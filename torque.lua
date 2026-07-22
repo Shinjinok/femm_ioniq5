@@ -16,7 +16,8 @@ print("angle_deg\ttorque_Nm")
 for angle = start_angle, end_angle, step_deg do
     if angle > 0 then
         mi_selectgroup(group_id)
-        mi_moverotate(0, 0, math.rad(step_deg))
+        -- 1도를 라디안으로 변환: 1 * π / 180 ≈ 0.017453292519943295
+        mi_moverotate(0, 0, 0.1.7453292519943295)
         mi_clearselected()
     end
 
