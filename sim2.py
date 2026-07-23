@@ -15,6 +15,7 @@ except ImportError:
     sys.exit(1)
 
 I_max = 215.0
+
 def run_simulation_only(args):
     """1단계: 각 프로세스에서 독립적으로 FEMM을 열어 해석(.ans 생성까지만) 수행"""
     angle_deg, base_file_path, femm_path, worker_id = args
@@ -35,15 +36,13 @@ def run_simulation_only(args):
         
         femm.opendocument(temp_file)
 
-        # 1. 3상 전류 계산 (최대 전류 215A 기준)
-        #I_max = 215.0
+        # 1. 3상 전류 계산
         theta_rad = math.radians(angle_deg)
-
         i_a = I_max * math.sin(theta_rad)
         i_b = I_max * math.sin(theta_rad - math.radians(120))
         i_c = I_max * math.sin(theta_rad + math.radians(120))
 
-        # 회로 속성 수정 (모델 파일에 맞게 'A', 'B', 'C' 설정)
+        # 회로 속성 수정
         circuit_names = ["A", "B", "C"]
         currents = [i_a, i_b, i_c]
         
@@ -71,11 +70,15 @@ def run_simulation_only(args):
                 pass
 
 
-def calculate_torque_from_results(angle_deg, temp_file, femm_path):
-    """2단계: 생성된 해석 결과(.ans)를 열어 그룹 1, 4 선택 후 토크 값 계산"""
+def calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir="femm_plots"):
+    """2단계: 결과(.ans)를 열어 토크 계산 및 화면 그림(이미지)으로 저장"""
     ans_file = temp_file.replace(".fem", ".ans")
     torque = 0.0
     femm_opened = False
+
+    # 저장할 디렉토리 생성
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
     try:
         if not os.path.exists(ans_file):
@@ -88,7 +91,7 @@ def calculate_torque_from_results(angle_deg, temp_file, femm_path):
         femm.opendocument(temp_file)
         femm.mi_loadsolution()
 
-        # 그룹 선택 및 토크 계산 (Weighted Stress Tensor: 10)
+        # 1. 그룹 선택 및 토크 계산 (Weighted Stress Tensor: 22)
         femm.mo_clearblock()
         for g_id in [1, 4]:
             try:
@@ -99,23 +102,35 @@ def calculate_torque_from_results(angle_deg, temp_file, femm_path):
         torque = femm.mo_blockintegral(22)
         print(f"[토크 계산완료] 전기적 회전각 {angle_deg:2d}도 | 토크: {torque:.4f} Nm")
 
+        # 2. 결과 화면 이미지로 저장하기
+        # showdensityplot: 0=원래대로, 1=자력선(Contour/Flux lines), 2=자속밀도 컬러맵(Density plot) 등 설정 가능
+        # 여기서는 자속밀도 컬러맵과 등고선이 표시된 상태를 가정하고 화면을 저장합니다.
+        
+        # 예시: 자속밀도 플롯 활성화 (밀도 채우기: 1, 등고선 개수 등 설정 가능)
+        # femm.mo_showdensityplot(1, 0, 2.5, 0, "bflow") # 필요시 옵션 조정
+        
+        img_path = os.path.join(output_dir, f"torque_result_{angle_deg}deg.png")
+        femm.mo_savebitmap(img_path)
+        print(f"[이미지 저장완료] {img_path}")
+
     except Exception as e:
-        print(f"[{angle_deg}도] 토크 계산 중 오류 발생: {e}")
+        print(f"[{angle_deg}도] 토크 계산 또는 이미지 저장 중 오류 발생: {e}")
         torque = 0.0
 
-    """ finally:
+    finally:
         if femm_opened:
             try:
                 femm.closefemm()
             except Exception:
                 pass
         
+        # 임시 파일 정리 (.fem, .ans 파일 삭제)
         for f_path in [temp_file, ans_file]:
             if os.path.exists(f_path):
                 try:
                     os.remove(f_path)
                 except Exception:
-                    pass """
+                    pass
 
     return torque
 
@@ -128,11 +143,10 @@ def main():
         print(f"오류: {base_file_path} 파일을 찾을 수 없습니다.")
         return
 
-    # 0도부터 90도까지 10도 간격 설정 (총 10개 각도)
+    # 90도부터 450도까지 10도 간격 설정 (원하시는 범위로 변경 가능합니다)
     angles = list(range(90, 451, 10))
 
     # 3상 전류 미리 계산 (그래프 표현용)
-    #I_max = 200.0
     ia_list, ib_list, ic_list = [], [], []
     for ang in angles:
         rad = math.radians(ang)
@@ -153,11 +167,11 @@ def main():
         print(f"오류: 병렬 해석 중 문제가 발생했습니다: {e}")
         return
 
-    print("\n=== 2단계: 후처리 토크 계산(Post-processing) 시작 ===")
+    print("\n=== 2단계: 후처리 토크 계산 및 이미지 저장 시작 ===")
     results = []
     for angle_deg, success, temp_file in simulation_results:
         if success:
-            torque = calculate_torque_from_results(angle_deg, temp_file, femm_path)
+            torque = calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir="femm_result_images")
             results.append((angle_deg, torque))
         else:
             results.append((angle_deg, 0.0))
@@ -173,7 +187,7 @@ def main():
     # 결과 요약 출력
     print("\n--- 모든 시뮬레이션 및 토크 계산 완료 ---")
     for ang, tq, ia, ib, ic in zip(sorted_angles, torques, ia_list, ib_list, ic_list):
-        print(f"각도: {ang:2d}도 | 토크: {tq:7.4f} Nm || Ia: {ia:6.2f}A, Ib: {ib:6.2f}A, Ic: {ic:6.2f}A")
+        print(f"각도: {ang:3d}도 | 토크: {tq:7.4f} Nm || Ia: {ia:6.2f}A, Ib: {ib:6.2f}A, Ic: {ic:6.2f}A")
 
     # Matplotlib 서브플롯 시각화 (위: 3상 전류 그래프, 아래: 토크 그래프)
     try:
@@ -195,12 +209,19 @@ def main():
         ax2.set_ylabel("Torque [Nm]", fontsize=11)
         ax2.grid(True, linestyle="--", alpha=0.7)
         ax2.legend(loc='upper right')
-        ax2.set_xticks(range(0, 91, 10))
+        
+        # x축 설정 (각도 범위에 맞게 조절)
+        ax2.set_xlim(min(sorted_angles), max(sorted_angles))
 
         plt.tight_layout()
+        
+        # 전체 토크/전류 종합 그래프도 파일로 저장
+        plt.savefig("torque_current_summary.png", dpi=300)
+        print("\n[종합 그래프 저장완료] torque_current_summary.png")
+        
         plt.show()
     except Exception as e:
-        print(f"경고: 그래프 생성 중 오류 발생: {e}")
+        print(f"경고: 그래프 생성 중 오류 성공/실패 여부 확인 필요: {e}")
 
 
 if __name__ == "__main__":
