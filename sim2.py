@@ -3,9 +3,10 @@ import os
 import shutil
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from tkinter import Image
 import matplotlib.pyplot as plt
 import numpy as np
-
+from PIL import Image, ImageDraw, ImageFont
 # 필수 모듈 확인
 try:
     import femm
@@ -53,7 +54,7 @@ def run_simulation_only(args):
                 pass
 
         # 2. 메시 생성 및 분석 실행 (해석 파일 .ans 생성)
-        femm.mi_analyze(1)
+        #femm.mi_analyze(1)
         print(f"[해석 완료] 전기적 회전각 {angle_deg:2d}도")
         
         return angle_deg, True, temp_file
@@ -85,14 +86,15 @@ def calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir=
             print(f"[{angle_deg}도] 결과 파일({ans_file})이 존재하지 않습니다.")
             return 0.0
 
-        femm.openfemm(femmpath=femm_path)
+        femm.openfemm()
         femm_opened = True
         
-        femm.opendocument(temp_file)
-        femm.mi_loadsolution()
+        #femm.opendocument(temp_file)
+        femm.opendocument(ans_file)
+       # femm.mi_loadsolution()
 
         # 1. 그룹 선택 및 토크 계산 (Weighted Stress Tensor: 22)
-        femm.mo_clearblock()
+        """  femm.mo_clearblock()
         for g_id in [1, 4]:
             try:
                 femm.mo_groupselectblock(g_id)
@@ -100,7 +102,7 @@ def calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir=
                 pass
 
         torque = femm.mo_blockintegral(22)
-        print(f"[토크 계산완료] 전기적 회전각 {angle_deg:2d}도 | 토크: {torque:.4f} Nm")
+        print(f"[토크 계산완료] 전기적 회전각 {angle_deg:2d}도 | 토크: {torque:.4f} Nm") """
 
         # 2. 결과 화면 이미지로 저장하기
         # showdensityplot: 0=원래대로, 1=자력선(Contour/Flux lines), 2=자속밀도 컬러맵(Density plot) 등 설정 가능
@@ -108,7 +110,11 @@ def calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir=
         
         # 예시: 자속밀도 플롯 활성화 (밀도 채우기: 1, 등고선 개수 등 설정 가능)
         # femm.mo_showdensityplot(1, 0, 2.5, 0, "bflow") # 필요시 옵션 조정
-        
+        #femm.mo_clearblock()
+        femm.main_resize(1200, 1000)
+        femm.mo_zoomnatural()
+        femm.mo_showdensityplot(1, 0, 4, 1e-4, "bmag")
+        #femm.mo_reload()
         img_path = os.path.join(output_dir, f"torque_result_{angle_deg}deg.png")
         femm.mo_savebitmap(img_path)
         print(f"[이미지 저장완료] {img_path}")
@@ -117,7 +123,34 @@ def calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir=
         print(f"[{angle_deg}도] 토크 계산 또는 이미지 저장 중 오류 발생: {e}")
         torque = 0.0
 
-    finally:
+    output_filename = img_path
+    try:
+        img = Image.open(output_filename)
+        draw = ImageDraw.Draw(img)
+
+    # 폰트 설정 (기본 폰트 사용 또는 시스템 폰트 경로 지정 가능)
+    # Windows 기본 폰트 예시: "malgun.ttf" (맑은 고딕), 크기 20
+        try:
+            font = ImageFont.truetype("malgun.ttf", 20)
+        except IOError:
+            font = ImageFont.load_default()  # 기본 폰트 실패 시 시스템 기본값
+
+        # 왼쪽 상단 여백 설정 (x=20, y=20)
+        text_position = (20, 20)
+        text_color = (0, 0, 0)  # 글자 색상 (검은색). 배경에 따라 (255, 255, 255) 흰색으로 변경 가능
+
+        # 텍스트 배경을 살짝 보이게 하거나 깔끔하게 그리기 위해 글자 렌더링
+        draw.text(text_position, temp_file, fill=text_color, font=font)
+
+        # 수정된 이미지 덮어쓰기 저장
+        img.save(output_filename)
+        print(f"[이미지 및 텍스트 합성 완료] {output_filename}")
+
+    except Exception as e:
+        print(
+            f"[이미지 저장 완료, 텍스트 합성 실패]: {output_filename} (오류: {e})"
+        )
+    """ finally:
         if femm_opened:
             try:
                 femm.closefemm()
@@ -130,7 +163,7 @@ def calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir=
                 try:
                     os.remove(f_path)
                 except Exception:
-                    pass
+                    pass """
 
     return torque
 
@@ -144,7 +177,7 @@ def main():
         return
 
     # 90도부터 450도까지 10도 간격 설정 (원하시는 범위로 변경 가능합니다)
-    angles = list(range(90, 451, 10))
+    angles = list(range(90, 450, 10))
 
     # 3상 전류 미리 계산 (그래프 표현용)
     ia_list, ib_list, ic_list = [], [], []
