@@ -15,7 +15,7 @@ except ImportError:
     print("설치 명령: pip install pyfemm")
     sys.exit(1)
 
-I_max = 215.0
+I_max = 228
 
 def run_simulation_only(args):
     """1단계: 각 프로세스에서 독립적으로 FEMM을 열어 해석(.ans 생성까지만) 수행"""
@@ -169,7 +169,7 @@ def calculate_torque_and_save_plots(angle_deg, temp_file, femm_path, output_dir=
 
 
 def main():
-    base_file_path = "ioniq5-6.FEM"  # 원본 FEM 파일 경로
+    base_file_path = "ioniq5-7.FEM"  # 원본 FEM 파일 경로
     femm_path = r"C:\femm42\bin"     # 사용자 지정 FEMM 경로
 
     if not os.path.exists(base_file_path):
