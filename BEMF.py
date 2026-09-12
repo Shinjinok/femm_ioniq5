@@ -15,15 +15,15 @@ except ImportError:
 # ==========================================
 # 설정 변수
 # ==========================================
-BASE_FILE = "ioniq5-8.FEM"  # 원본 FEM 파일
+BASE_FILE = "ioniq5-13.FEM"  # 원본 FEM 파일
 ROTOR_GROUP_ID = 1  # 회전자 Group 번호
 SPEED_RPM = 141.03  # 회전 속도 (RPM)
 CIRCUIT_NAMES = ["A", "B", "C"]  # FEMM 내 상 회로 이름
 
 # 기계적 회전각 범위 및 간격 (도 단위)
 # 백기전력 계산 시 미분 정확도를 위해 0.5도~1도 정도의 조촘한 간격 권장
-DEG_STEP = 1
-ANGLES = [round(a, 2) for a in np.arange(0, 31, DEG_STEP)]
+DEG_STEP = 5
+ANGLES = [round(a, 2) for a in np.arange(0, 360, DEG_STEP)]
 
 
 def run_simulation(args):
@@ -128,13 +128,13 @@ def main():
 
     emf_data = {}
     for c in CIRCUIT_NAMES:
-        flux_array = np.array(flux_data[c])
+        flux_array = np.array(flux_data[c]) *8
         # 수치 미분: d(Flux)/d(theta) [Wb/rad]
         dflux_dtheta = np.gradient(flux_array, angles_rad_e)
 
         # e = - omega_m * (dFlux / dtheta)
         emf = -omega_e * dflux_dtheta
-        emf_data[c] = emf
+        emf_data[c] = emf 
 
     # ==========================================
     # 4단계: Matplotlib 시각화
