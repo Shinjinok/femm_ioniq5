@@ -6,18 +6,23 @@ import numpy as np
 import pandas as pd
 import pythoncom
 import femm
+import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count
+
+# 한글 폰트 깨짐 방지 (Windows 환경 기준)
+plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['axes.unicode_minus'] = False
+
+delete_temp_files = True  # True로 설정하면 각 프로세스 종료 후 임시 파일 삭제
 
 def worker_process(args):
     """
-    개별 프로세스가 할당받은 전기각(Theta_e) 리스트를 순회하며 
-    8극 모터의 전기각/기계각 관계에 따른 로터 회전 및 A상 100A 고정 인가 해석 수행
+    개별 프로세스가 할당받은 전기각(Theta_e) 리스트와 지정된 전류(ia_val)로 
+    8극 모터의 로터 회전 및 고정 인가 해석 수행
     """
     pythoncom.CoInitialize()  # Windows COM 초기화
     
-    worker_id, task_chunk, base_fem_path, magnet_material_name, rotor_group_no, pole_pairs = args
-    
-    # 프로세스 충돌 방지를 위해 작업용 독립 .fem 파일 복사 생성
+    worker_id, task_chunk, base_fem_path, magnet_material_name, rotor_group_no, pole_pairs, ia_val = args
     process_fem_path = f"model_worker_{worker_id}.fem"
     
     results = []
@@ -25,11 +30,8 @@ def worker_process(args):
     try:
         for theta_e_rad in task_chunk:
             theta_e_deg = np.degrees(theta_e_rad)
-            
-            # [8극 모터 반영] 전기각을 극쌍수(pole_pairs = 4)로 나누어 실제 기계각(Mechanical Angle) 계산
             theta_m_deg = theta_e_deg / pole_pairs
             
-            # 매 스텝마다 신규 파일 복사 및 FEMM 인스턴스 재시작으로 초기 상태 보장
             if os.path.exists(process_fem_path):
                 os.remove(process_fem_path)
             shutil.copy(base_fem_path, process_fem_path)
@@ -39,15 +41,14 @@ def worker_process(args):
             
             # 1. 영구자석 물성치 변경 (순수 돌극성 추출: mu=1, Hc=0)
             try:
-                femm.mi_modifymaterial(magnet_material_name, 1, 1.0)  # mu_x = 1.0
-                femm.mi_modifymaterial(magnet_material_name, 2, 1.0)  # mu_y = 1.0
-                femm.mi_modifymaterial(magnet_material_name, 3, 0.0)  # Coercivity = 0
-            except Exception as e:
+                femm.mi_modifymaterial(magnet_material_name, 1, 1.0)
+                femm.mi_modifymaterial(magnet_material_name, 2, 1.0)
+                femm.mi_modifymaterial(magnet_material_name, 3, 0.0)
+            except Exception:
                 pass
 
-            # 2. A상 고정 전류 설정 (600A 일정), B상/C상은 0A
-            ia_const = 600.0
-            femm.mi_setcurrent('A', ia_const)
+            # 2. A상 고정 전류 설정, B상/C상은 0A
+            femm.mi_setcurrent('A', ia_val)
             femm.mi_setcurrent('B', 0.0)
             femm.mi_setcurrent('C', 0.0)
 
@@ -67,102 +68,165 @@ def worker_process(args):
             _, _, lambda_b = femm.mo_getcircuitproperties('B')
             _, _, lambda_c = femm.mo_getcircuitproperties('C')
             
-            results.append((theta_e_rad, theta_e_deg, theta_m_deg, ia_const, lambda_a, lambda_b, lambda_c))
-            
-            # FEMM 인스턴스 닫기
+            results.append((theta_e_rad, theta_e_deg, theta_m_deg, ia_val, lambda_a, lambda_b, lambda_c))
             femm.closefemm()
             
     finally:
-        pythoncom.CoUninitialize()  # COM 해제
-        
-        # 임시 파일 및 부산물 정리
-        for ext in ['.fem', '.ans', '.rec']:
-            file_path = process_fem_path.replace('.fem', ext)
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except:
-                    pass
+        pythoncom.CoUninitialize()
+        if delete_temp_files:
+            for ext in ['.fem', '.ans', '.rec']:
+                file_path = process_fem_path.replace('.fem', ext)
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
                 
     return results
 
-def calculate_rotor_sweep_inductance_parallel():
-    base_fem_path = "ioniq5-6.FEM"
+def plot_inductance_results(df_results, ia_val, output_image_path="inductance_plot.png"):
+    """특정 전류 조건의 인덕턴스 파형 결과 플롯 및 그래프 저장"""
+    theta_deg = df_results['Theta_Elec_deg']
+    laa = df_results['Laa'] * 1e6  # μH 단위 변환
+    lab = df_results['Lab'] * 1e6
+    lac = df_results['Lac'] * 1e6
+
+    metrics = {}
+    for name, val in [('Laa', laa), ('Lab', lab), ('Lac', lac)]:
+        center = np.mean(val)
+        amplitude = (np.max(val) - np.min(val)) / 2.0
+        metrics[name] = {'center': center, 'amp': amplitude}
+
+    plt.figure(figsize=(11, 7))
+
+    plt.plot(theta_deg, laa, label='Laa (자기인덕턴스)', color='blue', lw=2)
+    plt.plot(theta_deg, lab, label='Lab (상호인덕턴스 A-B)', color='green', lw=2)
+    plt.plot(theta_deg, lac, label='Lac (상호인덕턴스 A-C)', color='orange', lw=2)
+
+    colors = {'Laa': 'blue', 'Lab': 'green', 'Lac': 'orange'}
+    annot_configs = {
+        'Laa': {'x': 45,  'y_offset': 25},
+        'Lab': {'x': 90,  'y_offset': -35},
+        'Lac': {'x': 135, 'y_offset': 25}
+    }
+
+    for name, data in metrics.items():
+        c = data['center']
+        a = data['amp']
+        plt.axhline(c, color=colors[name], linestyle='--', alpha=0.6, lw=1)
+        
+        cfg = annot_configs[name]
+        annot_text = f"[{name}]\n중심: {c:.2f} μH\n진폭: {a:.2f} μH"
+        
+        plt.annotate(annot_text, 
+                     xy=(cfg['x'], c), 
+                     xytext=(cfg['x'], c + cfg['y_offset']),
+                     arrowprops=dict(arrowstyle="->", color=colors[name], lw=1),
+                     ha='center', fontsize=9, fontweight='bold',
+                     bbox=dict(boxstyle='round,pad=0.4', fc='white', ec=colors[name], alpha=0.9))
+
+    plt.title(f"전류 {ia_val}A 조건 - 전기각에 따른 상 인덕턴스 프로파일", fontsize=13, fontweight='bold')
+    plt.xlabel("전기각 [deg]", fontsize=11)
+    plt.ylabel("인덕턴스 [μH]", fontsize=11)
+    plt.grid(True, which='both', linestyle='--', alpha=0.6)
+    plt.legend(loc="upper right", fontsize=10)
+    plt.tight_layout()
+
+    plt.savefig(output_image_path, dpi=300)
+    plt.close()
+    print(f"[전류 {ia_val}A 파형 플롯 저장 완료] {output_image_path}")
+
+def run_multi_current_sweep():
+    base_fem_path = "ioniq5-13.FEM"
     if not os.path.exists(base_fem_path):
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
-    # 모델 설정 값
-    magnet_material_name = "NdFeB 40 MGOe" 
-    rotor_group_no = 1     # FEMM 모델 내 회전자 영역의 그룹 번호 (모델에 맞게 수정 필요)
-    pole_number = 8        # 폴수 (8극)
-    pole_pairs = pole_number / 2  # 극쌍수 (4)
+    magnet_material_name = "Mag" 
+    rotor_group_no = 1 
+    pole_number = 8 
+    pole_pairs = pole_number / 2 
 
-    # 전기각 기준 0도 ~ 180도, 10도 간격 리스트 생성
-    theta_e_list = np.radians(np.arange(0, 181, 10))  # 0°, 10°, 20°, ..., 180°
+    # 10A ~ 350A, 50A 간격 설정
+    current_list = np.arange(0, 200, 50)
+    theta_e_list = np.radians(np.arange(0, 360, 6))  # 0° ~ 360°, 6° 간격
     
-    total_tasks = len(theta_e_list)
-    num_processes = min(cpu_count(), total_tasks)
-    
+    summary_records = []
+    total_start_time = time.time()
+
     print(f"==================================================")
-    print(f" [8극 모터 로터 회전 및 A상 600A 여자 해석]")
-    print(f" 폴수: {pole_number}극 (극쌍수 p = {int(pole_pairs)})")
-    print(f" 총 연산 전기각 수 : {total_tasks}개 (0° ~ 180°, 10° 간격)")
-    print(f" 활용 멀티스레드 수 : {num_processes}개")
+    print(f" [다중 전류 조건별 8극 모터 인덕턴스 스윕 해석]")
+    print(f" 전류 범위: {current_list[0]}A ~ {current_list[-1]}A (간격: 50A)")
+    print(f" 총 전류 조건 수: {len(current_list)}개")
     print(f"==================================================")
-    
-    # 작업 분할 (Chunking)
-    task_chunks = np.array_split(theta_e_list, num_processes)
-    
-    worker_args = []
-    for idx, chunk in enumerate(task_chunks):
-        if len(chunk) > 0:
-            worker_args.append((idx, list(chunk), base_fem_path, magnet_material_name, rotor_group_no, pole_pairs))
-            
-    # --- [시간 측정 시작] ---
-    start_time_sec = time.time()
-    print(f" 시뮬레이션 시작 시간: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"--------------------------------------------------")
-    
-    # 멀티프로세싱 풀 실행
-    with Pool(processes=len(worker_args)) as pool:
-        chunk_results = pool.map(worker_process, worker_args)
+
+    for ia_val in current_list:
+        print(f"\n--- [현재 전류 조건: {ia_val}A] 해석 진행 중 ---")
         
-    # --- [시간 측정 종료] ---
-    elapsed_sec = time.time() - start_time_sec
-    print(f"--------------------------------------------------")
-    print(f" 시뮬레이션 종료 시간: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f" 총 소요 시간      : {int(elapsed_sec // 60)}분 {elapsed_sec % 60:.2f}초")
+        total_tasks = len(theta_e_list)
+        num_processes = min(cpu_count(), total_tasks)
+        task_chunks = np.array_split(theta_e_list, num_processes)
+        
+        worker_args = [(idx, list(chunk), base_fem_path, magnet_material_name, rotor_group_no, pole_pairs, ia_val) 
+                       for idx, chunk in enumerate(task_chunks) if len(chunk) > 0]
+        
+        start_time_sec = time.time()
+        with Pool(processes=len(worker_args)) as pool:
+            chunk_results = pool.map(worker_process, worker_args)
+        elapsed_sec = time.time() - start_time_sec
+        print(f" -> {ia_val}A 해석 완료 (소요 시간: {int(elapsed_sec // 60)}분 {elapsed_sec % 60:.2f}초)")
+        
+        # 결과 데이터 변환
+        current_records = []
+        for process_data in chunk_results:
+            for theta_e_rad, theta_e_deg, theta_m_deg, ia, la, lb, lc in process_data:
+                Laa = la / ia if abs(ia) > 1e-5 else 0.0
+                Lab = lb / ia if abs(ia) > 1e-5 else 0.0
+                Lac = lc / ia if abs(ia) > 1e-5 else 0.0
+                
+                current_records.append({
+                    'Current_A': ia,
+                    'Theta_Elec_deg': theta_e_deg,
+                    'Theta_Mech_deg': theta_m_deg,
+                    'Theta_Elec_rad': theta_e_rad,
+                    'Lambda_a': la, 'Lambda_b': lb, 'Lambda_c': lc,
+                    'Laa': Laa, 'Lab': Lab, 'Lac': Lac
+                })
+
+        df_current = pd.DataFrame(current_records)
+        df_current = df_current.sort_values(by='Theta_Elec_deg').reset_index(drop=True)
+
+        # 1. 각 전류별 계산 완료 즉시 파형 그래프 저장
+        plot_inductance_results(df_current, ia_val=ia_val, output_image_path=f"inductance_plot_{int(ia_val)}A.png")
+
+        # 2. 각 상별 중심값(Center)과 진폭(Amplitude) 계산 후 요약 리스트에 추가
+        laa_vals = df_current['Laa'] * 1e6
+        lab_vals = df_current['Lab'] * 1e6
+        lac_vals = df_current['Lac'] * 1e6
+
+        summary_records.append({
+            'Current_A': ia_val,
+            'Laa_Center_uH': np.mean(laa_vals),
+            'Laa_Amplitude_uH': (np.max(laa_vals) - np.min(laa_vals)) / 2.0,
+            'Lab_Center_uH': np.mean(lab_vals),
+            'Lab_Amplitude_uH': (np.max(lab_vals) - np.min(lab_vals)) / 2.0,
+            'Lac_Center_uH': np.mean(lac_vals),
+            'Lac_Amplitude_uH': (np.max(lac_vals) - np.min(lac_vals)) / 2.0,
+        })
+
+    # 모든 전류 계산이 끝난 후 요약 데이터 CSV 저장
+    df_summary = pd.DataFrame(summary_records)
+    summary_csv_filename = f"{base_fem_path}_inductance_table.csv"
+    df_summary.to_csv(summary_csv_filename, index=False, encoding="utf-8-sig")
+
+    total_elapsed = time.time() - total_start_time
+    print(f"\n==================================================")
+    print(f" 모든 전류 조건 스윕 해석 총 소요 시간: {int(total_elapsed // 60)}분 {total_elapsed % 60:.2f}초")
+    print(f" 각 전류별 중심값/진폭 요약 CSV 파일 저장 완료: '{summary_csv_filename}'")
     print(f"==================================================")
-    
-    # 결과를 데이터프레임으로 재구성 및 인덕턴스 계산
-    data_records = []
-    for process_data in chunk_results:
-        for theta_e_rad, theta_e_deg, theta_m_deg, ia, la, lb, lc in process_data:
-            Laa = la / ia if abs(ia) > 1e-5 else 0.0
-            Lab = lb / ia if abs(ia) > 1e-5 else 0.0
-            Lac = lc / ia if abs(ia) > 1e-5 else 0.0
-            
-            data_records.append({
-                'Theta_Elec_deg': theta_e_deg,
-                'Theta_Mech_deg': theta_m_deg,
-                'Theta_Elec_rad': theta_e_rad,
-                'Ia': ia,
-                'Lambda_a': la, 'Lambda_b': lb, 'Lambda_c': lc,
-                'Laa': Laa, 'Lab': Lab, 'Lac': Lac
-            })
 
-    # 정렬 및 CSV 저장
-    df_results = pd.DataFrame(data_records)
-    df_results = df_results.sort_values(by='Theta_Elec_deg').reset_index(drop=True)
-    
-    output_filename = "a_phase_600A_8pole_inductance.csv"
-    df_results.to_csv(output_filename, index=False, encoding="utf-8-sig")
-    print(f" '{output_filename}' 저장 완료!")
-
-    return df_results
+    return df_summary
 
 if __name__ == '__main__':
     import multiprocessing
     multiprocessing.freeze_support()
-    
-    df_results = calculate_rotor_sweep_inductance_parallel()
+    df_summary = run_multi_current_sweep()

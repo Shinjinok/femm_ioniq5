@@ -3,7 +3,7 @@
 [Precision]   =  1e-008
 [MinAngle]    =  30
 [DoSmartMesh] =  1
-[Depth]       =  153
+[Depth]       =  154
 [LengthUnits] =  millimeters
 [ProblemType] =  planar
 [Coordinates] =  cartesian
@@ -163,9 +163,9 @@
   <EndBlock>
   <BeginBlock>
     <BlockName> = "Mag"
-    <Mu_x> = 1.05
-    <Mu_y> = 1.05
-    <H_c> = 995000
+    <Mu_x> = 1
+    <Mu_y> = 1
+    <H_c> = 950000
     <H_cAngle> = 0
     <J_re> = 0
     <J_im> = 0
@@ -176,8 +176,8 @@
     <Phi_hy> = 0
     <LamType> = 0
     <LamFill> = 1
-    <NStrands> = 0
-    <WireD> = 0
+    <NStrands> = 1
+    <WireD> = 2
     <BHPoints> = 0
   <EndBlock>
   <BeginBlock>
@@ -201,8 +201,8 @@
   <EndBlock>
   <BeginBlock>
     <BlockName> = "Steel"
-    <Mu_x> = 4416
-    <Mu_y> = 4416
+    <Mu_x> = 100000000
+    <Mu_y> = 100000000
     <H_c> = 0
     <H_cAngle> = 0
     <J_re> = 0
@@ -493,11 +493,11 @@
 73	83	6.5037283596265878	1	0	0	0	1
 81	91	6.5037273544940541	1	0	0	0	1
 97	75	3.2537296337041179	1	0	0	0	1
-93	92	45	1	8	0	0	1
-98	95	45	1	8	0	1	1
+93	92	45	1	8	0	0	0.56999999999999995
+98	95	45	1	8	0	1	0.76000000000000001
 99	96	45	1	0	0	1	1
-100	102	45	1	5	0	1	1
-101	103	45	1	5	0	0	1
+100	102	45	1	5	0	1	0.17999999999999999
+101	103	45	1	5	0	0	0.17999999999999999
 89	39	7.5	1	0	0	0	1
 [NumHoles] = 0
 [NumBlockLabels] = 22

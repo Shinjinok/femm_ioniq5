@@ -22,8 +22,8 @@ CIRCUIT_NAMES = ["A", "B", "C"]  # FEMM 내 상 회로 이름
 
 # 기계적 회전각 범위 및 간격 (도 단위)
 # 백기전력 계산 시 미분 정확도를 위해 0.5도~1도 정도의 조촘한 간격 권장
-DEG_STEP = 5
-ANGLES = [round(a, 2) for a in np.arange(0, 360, DEG_STEP)]
+DEG_STEP = 1
+ANGLES = [round(a, 2) for a in np.arange(0, 45, DEG_STEP)]
 
 
 def run_simulation(args):
@@ -136,6 +136,7 @@ def main():
         emf = -omega_e * dflux_dtheta
         emf_data[c] = emf 
 
+    np.savetxt("results_emf.csv", np.column_stack([ANGLES] + [emf_data[c] for c in CIRCUIT_NAMES]), delimiter=",", header="Angle,Phase A,Phase B,Phase C", comments="")
     # ==========================================
     # 4단계: Matplotlib 시각화
     # ==========================================
