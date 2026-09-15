@@ -36,7 +36,7 @@ def load_and_interpolate_inductance(
 # ==========================================
 # 1. 시뮬레이션 및 모터 파라미터 설정
 # ==========================================
-T_sim = 2.0  # 시뮬레이션 총 시간 [s]
+T_sim = 1.0  # 시뮬레이션 총 시간 [s]
 dt = 1e-4  # 샘플링 시간 [s]
 time = np.arange(0, T_sim, dt)
 N = len(time)
@@ -49,7 +49,7 @@ T_load = 0.5  # 부하 토크 [N*m]
 
 # 인덕턴스 테이블 로드 및 보간기 생성
 interpolators, df_table = load_and_interpolate_inductance(
-    "ioniq5-13.FEM_inductance_table.csv"
+    "ioniq5-13.FEM_all_currents_inductance_summary.csv"
 )
 
 
@@ -58,30 +58,35 @@ def get_inductance_matrix(i_abc, theta_r):
     i_norm = np.max(np.abs(i_abc))
 
     # 보간기로부터 Center 및 Amplitude 획득 (μH -> H 변환: * 1e-6)
-    Laa_c = float(interpolators["Laa_Center_uH"](i_norm)) * 1e-6
-    Laa_a = float(interpolators["Laa_Amplitude_uH"](i_norm)) * 1e-6
+    La = float(interpolators["Laa_Center_uH"](i_norm)) * 1e-6
+    Lb = float(interpolators["Laa_Amplitude_uH"](i_norm)) * 1e-6
 
-    Lab_c = float(interpolators["Lab_Center_uH"](i_norm)) * 1e-6
-    Lab_a = float(interpolators["Lab_Amplitude_uH"](i_norm)) * 1e-6
+    La2 = float(interpolators["Lab_Center_uH"](i_norm)) * 1e-6
+    Lb2 = float(interpolators["Lab_Amplitude_uH"](i_norm)) * 1e-6
 
-    Lac_c = float(interpolators["Lac_Center_uH"](i_norm)) * 1e-6
-    Lac_a = float(interpolators["Lac_Amplitude_uH"](i_norm)) * 1e-6
+    La3 = float(interpolators["Lac_Center_uH"](i_norm)) * 1e-6
+    Lb3 = float(interpolators["Lac_Amplitude_uH"](i_norm)) * 1e-6
 
     th_e = 4 * theta_r  # 8극 모터 (극쌍수 = 4)
 
     # 공간 고조파 및 진폭 반영 (과도한 변동 방지를 위해 정규화된 형태 유지)
-    laa = Laa_c + Laa_a * np.cos(th_e)
-    lab = Lab_c + Lab_a * np.cos(th_e - 2 * np.pi / 3)
-    lac = Lac_c + Lac_a * np.cos(th_e + 2 * np.pi / 3)
+    l11 =  La - Lb * np.cos(2 * th_e)
+    l12 =  La2 - Lb2 * np.cos(2 * th_e - 2 * np.pi / 3)
+    l13 =  La3 - Lb3 * np.cos(2 * th_e + 2 * np.pi / 3)
+    l22 =  La - Lb * np.cos(2 * th_e + 2 * np.pi / 3)
+    l23 =  La2 - Lb2 * np.cos(2 * th_e)
+    l33 =  La - Lb * np.cos(2 * th_e - 2 * np.pi / 3)
 
     # 대칭 3상 인덕턴스 행렬 구성
-    Ls = np.array([[laa, lab, lac], [lab, laa, lab], [lac, lab, laa]])
+    Ls = np.array([[l11, l12, l13], 
+                   [l12, l22, l23], 
+                   [l13, l23, l33]])
 
     # 수치 발산 방지를 위한 행렬 양정정(Positive Definite) 보정
     # 최소 자기인덕턴스 보장 및 상호인덕턴스 크기 제한
-    min_self = max(Laa_c * 0.5, 1e-5)
+    """ min_self = max(Laa_c * 0.5, 1e-5)
     for r in range(3):
-        Ls[r, r] = max(Ls[r, r], min_self)
+        Ls[r, r] = max(Ls[r, r], min_self) """
 
     return Ls
 

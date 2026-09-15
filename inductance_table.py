@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
 
-def load_and_interpolate_inductance(csv_filename="ioniq5-13.FEM_inductance_table.csv", query_current=75.0):
+def load_and_interpolate_inductance(csv_filename="ioniq5-13.FEM_all_currents_inductance_summary.csv", query_current=75.0):
     if not os.path.exists(csv_filename):
         raise FileNotFoundError(f"파일을 찾을 수 없습니다: {csv_filename}")
 
