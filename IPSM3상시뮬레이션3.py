@@ -33,7 +33,7 @@ def load_and_interpolate_inductance(
   return interpolators, df
 # 인덕턴스 테이블 로드 및 보간기 생성
 interpolators, df_table = load_and_interpolate_inductance(
-    "ioniq5-13.FEM_all_currents_inductance_summary.csv"
+    "ioniq5-13.FEM_inductance_table_1.csv"
 )
 
 
@@ -71,7 +71,7 @@ dt = 1e-4  # 샘플링 시간 [s]
 time = np.arange(0, T_sim, dt)
 N = len(time)
 
-Rs = 1.2*np.ones(3)  # 고정자 저항 [ohm]
+Rs = 1.2*np.eye(3)  # 고정자 저항 [ohm]
 Ld = 8.5e-3  # d축 인덕턴스 [H]
 Lq = 8.5e-3  # q축 인덕턴스 [H]
 phi_m = 0.12  # 영구자석 쇄교자속 [Wb]
@@ -83,8 +83,9 @@ T_load = 0.5  # 부하 토크 [N*m]
 Ls_1 = get_inductance_matrix(200*np.ones(3), 0*np.pi/180)  # 초기
 Ld = Ls_1[0, 0]
 
-Ls_matrix = [[Ld+1e-4, -Ld/2, -Ld/2], [-Ld/2, Ld+1e-4, -Ld/2], [-Ld/2, -Ld/2, Ld+1e-4]]  # 초기
-
+#Ls_matrix = [[Ld+1e-4, -Ld/2, -Ld/2], [-Ld/2, Ld+1e-4, -Ld/2], [-Ld/2, -Ld/2, Ld+1e-4]]  # 초기
+Ls_matrix = get_inductance_matrix(200*np.ones(3), 0) + 1e-4*np.eye(3)  # 초기 인덕턴스 행렬
+print("Ls_matrix:\n", Ls_matrix)
 
 # ==========================================
 # 2. 파크/클라크 변환 함수 정의
@@ -134,7 +135,7 @@ def S_func(theta_e):
 # 3. 제어기(PI Controller) 변수 초기화
 # ==========================================
 # 속도 제어기 게인
-Kp_spd, Ki_spd = 0.1, 1.0
+Kp_spd, Ki_spd = 0.2, 5.0
 integral_spd_err = 0.0
 
 # 전류 제어기 게인 (d축, q축)
@@ -160,8 +161,7 @@ i_history = np.zeros((3, N))
 omega_history = np.zeros(N)
 omega_ref_history = np.zeros(N)
 Te_history = np.zeros(N)
-#인덕턴스 행렬 설정
-print("Ls_matrix:", Ls_matrix)
+
 # ==========================================
 # 5. 메인 제어 및 시뮬레이션 루프
 # ==========================================
@@ -177,7 +177,7 @@ for k in range(N):
   integral_spd_err += spd_err * dt
   iq_ref = Kp_spd * spd_err + Ki_spd * integral_spd_err
   iq_ref = np.clip(iq_ref, -20, 20)  # 전류 지령 제한
-  id_ref = 0.0  # SPMSM이므로 d축 전류는 0으로 제어
+  id_ref = 0#-iq_ref*np.sin(50*np.pi/180)  # SPMSM이므로 d축 전류는 0으로 제어
   
     # --- [2] 피드백 전류 측정 및 dq 변환 ---
   id_cur, iq_cur = abc_to_dq(i_abc, theta_e)
@@ -202,35 +202,36 @@ for k in range(N):
 
   # --- [5] 모터 모델 전개 (전기적/기계적 동역학) ---
   # di_abc/dt 계산 (간이 저항-인덕턴스 회로 방정식)
-  di_dt = np.dot(np.linalg.inv(Ls_matrix), (v_abc - Rs * i_abc - pole_pairs * omega_r * phi_m * np.array([
+  """ di_dt = np.dot(np.linalg.inv(Ls_matrix), (v_abc - Rs * i_abc - pole_pairs * omega_r * phi_m * np.array([
       -np.sin(theta_e),
       -np.sin(theta_e - 2 * np.pi / 3),
       -np.sin(theta_e + 2 * np.pi / 3),
-  ])))
+  ]))) """
 
   
-  
-  """ Ls_sub = get_inductance_matrix(i_abc, theta_e)
-  inv_Ls = np.linalg.inv(Ls_sub + np.eye(3) * 1e-6)
+  Ls_matrix = get_inductance_matrix(i_abc, 0) #+ 1e-4*np.eye(3)  # 초기 인덕턴스 행렬
+  #Ls_sub = get_inductance_matrix(i_abc, theta_e)
+  inv_Ls = np.linalg.inv(Ls_matrix + np.eye(3) * 1e-6)
   S_theta_e = S_func(theta_e)
+  
   term1 = np.dot(inv_Ls, np.dot(Rs, i_abc))
   term2 = np.dot(inv_Ls, v_abc)
   term3 = 4 * omega_r * phi_m *np.dot(inv_Ls, S_theta_e)
   di_dt = -term1 + term2 - term3
-
-  #Te = phi_m * np.dot(np.transpose(S_theta_e), i_abc) """
+  
+  Tr = pole_pairs*phi_m * np.dot(np.transpose(S_theta_e), i_abc) 
   # 전자기 토크 계산
-  Te = 1.5 * pole_pairs * (phi_m * iq_cur + (Ld - Lq) * id_cur * iq_cur)
-  Te_history[k] = Te
+  #Te = 1.5 * pole_pairs * (phi_m * iq_cur + (Ld - Lq) * id_cur * iq_cur)
+  Te_history[k] = Tr
       # 속도 및 각도 변화율 계산 (운동 방정식)
-  domega_dt = (Te - T_load - B * omega_r) / J
+  domega_dt = (Tr - T_load - B * omega_r) / J
   dtheta_dt = omega_r
   
     # 오일러 적분 (수치 해석)
   i_abc += di_dt * dt
   omega_r += domega_dt * dt
   theta_r += dtheta_dt * dt
-  theta_r = np.mod(theta_r, 2 * np.pi / pole_pairs)  # 각도 범위 정규화
+  theta_r = np.mod(theta_r, 2 * np.pi)  # 각도 범위 정규화
   
     # 기록
   i_history[:, k] = i_abc

@@ -147,7 +147,7 @@ def run_multi_current_sweep():
     pole_pairs = pole_number / 2 
 
     # 10A ~ 350A, 50A 간격 설정
-    current_list = np.arange(0, 200, 50)
+    current_list = [1,5,10,20,30] + list(np.arange(50, 401, 50))
     theta_e_list = np.radians(np.arange(0, 360, 6))  # 0° ~ 360°, 6° 간격
     
     summary_records = []

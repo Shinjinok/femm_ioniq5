@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
-def plot_inductance_summary(csv_filename="ioniq5-13.FEM_all_currents_inductance_summary.csv"):
+def plot_inductance_summary(csv_filename="ioniq5-13.FEM_inductance_table_1.csv"):
     # CSV 파일 읽기
     df = pd.read_csv(csv_filename)
     
