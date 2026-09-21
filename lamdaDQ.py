@@ -69,7 +69,7 @@ def worker_process(args):
     return results
 
 def calculate_dq_inductance_map_parallel():
-    base_fem_path = "ioniq5-14.FEM"
+    base_fem_path = "ioniq5-13.FEM"
     if not os.path.exists(base_fem_path):
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 

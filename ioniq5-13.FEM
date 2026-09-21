@@ -165,7 +165,7 @@
     <BlockName> = "Mag"
     <Mu_x> = 1
     <Mu_y> = 1
-    <H_c> = 1023000
+    <H_c> = 1125000
     <H_cAngle> = 0
     <J_re> = 0
     <J_im> = 0
