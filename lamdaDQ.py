@@ -9,7 +9,7 @@ from multiprocessing import Pool, cpu_count
 
 def worker_process(args):
     """
-    개별 프로세스가 할당받은 (id, iq) 조합 리스트를 순회하며 FEMM 해석을 수행하는 함수
+    개별 프로세스가 할당받은 (beta_val, id_val, iq_val) 조합 리스트를 순회하며 FEMM 해석을 수행하는 함수
     """
     worker_id, task_chunk, base_fem_path = args
     
@@ -17,7 +17,7 @@ def worker_process(args):
     process_fem_path = f"model_worker_{worker_id}.fem"
     shutil.copy(base_fem_path, process_fem_path)
     
-    # 각 프로세스별 독립된 FEMM 인스턴스 열기 (0: GUI 숨김 백그라운드 실행)
+    # 각 프로세스별 독립된 FEMM 인스턴스 열기 (1: 백그라운드 실행 또는 가시화 설정)
     femm.openfemm(1)
     femm.opendocument(process_fem_path)
     
@@ -25,7 +25,7 @@ def worker_process(args):
     theta_r = 0.0  # 전기각 고정
     
     try:
-        for id_val, iq_val in task_chunk:
+        for beta_val, id_val, iq_val in task_chunk:
             # 1. Park/Clark 변환 역과정 (3상 전류 계산)
             ia = id_val * np.cos(theta_r) - iq_val * np.sin(theta_r)
             ib = id_val * np.cos(theta_r - 2.0*np.pi/3.0) - iq_val * np.sin(theta_r - 2.0*np.pi/3.0)
@@ -54,8 +54,8 @@ def worker_process(args):
                                      lambda_b * np.sin(theta_r - 2.0*np.pi/3.0) + 
                                      lambda_c * np.sin(theta_r + 2.0*np.pi/3.0))
             
-            results.append((id_val, iq_val, lambda_d, lambda_q))
-            print(f"[Worker {worker_id}] Id: {id_val}, Iq: {iq_val} 완료")
+            results.append((beta_val, id_val, iq_val, lambda_d, lambda_q))
+            print(f"[Worker {worker_id}] Beta: {beta_val}°, Id: {id_val:.2f}, Iq: {iq_val:.2f} 완료")
                 
     finally:
         # 작업 종료 후 FEMM 닫기 및 임시 파일 정리
@@ -69,15 +69,25 @@ def worker_process(args):
     return results
 
 def calculate_dq_inductance_map_parallel():
-    base_fem_path = "ioniq5-6.FEM"
+    base_fem_path = "ioniq5-14.FEM"
     if not os.path.exists(base_fem_path):
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
-    id_list = np.linspace(-100, 0, 6)
-    iq_list = np.linspace(0, 180, 10)
+    # 전류 크기 0 ~ 340A (34A 간격), 위상각 90 ~ 180도 (5도 간격)
+    idq_list = np.arange(0, 341, 34)
+    ibeta_list = np.arange(90, 181, 5)
     
-    # 1. 모든 (id, iq) 조합 생성 (총 66개)
-    all_tasks = [(id_val, iq_val) for id_val in id_list for iq_val in iq_list]
+    # Meshgrid를 통한 d, q 전류 격자 생성
+    IDQ, IBETA = np.meshgrid(idq_list, ibeta_list)
+    id_grid = IDQ * np.cos(np.radians(IBETA))
+    iq_grid = IDQ * np.sin(np.radians(IBETA))
+    
+    # 1. 모든 (beta, id, iq) 조합 리스트 생성 (추적을 위해 beta값도 함께 묶음)
+    all_tasks = []
+    for beta_val, id_row, iq_row in zip(ibeta_list, id_grid, iq_grid):
+        for id_val, iq_val in zip(id_row, iq_row):
+            all_tasks.append((beta_val, id_val, iq_val))
+            
     total_tasks = len(all_tasks)
     
     # 2. 시스템 최대 가용 스레드 수 확인
@@ -120,33 +130,45 @@ def calculate_dq_inductance_map_parallel():
     print(f" 총 소요 시간      : {int(elapsed_min)}분 {remaining_sec:.2f}초 (총 {elapsed_sec:.2f}초)")
     print(f"==================================================")
     
-    # 5. 결과를 전체 맵 그리드로 재구성
-    Ld_map = np.zeros((len(id_list), len(iq_list)))
-    Lq_map = np.zeros((len(id_list), len(iq_list)))
-    
-    id_to_idx = {val: i for i, val in enumerate(id_list)}
-    iq_to_idx = {val: i for i, val in enumerate(iq_list)}
-    
+    # 5. 결과를 평탄화하여 데이터프레임으로 변환 (8000 곱하기 및 소수점 2째 자리 반올림 적용)
+    flat_results = []
     for process_data in chunk_results:
-        for id_val, iq_val, l_d, l_q in process_data:
-            i = id_to_idx[id_val]
-            j = iq_to_idx[iq_val]
-            Ld_map[i, j] = l_d 
-            Lq_map[i, j] = l_q
-
-    # 6. Pandas를 이용해 CSV 파일로 저장
-    # 행(Index): id_list, 열(Columns): iq_list
-    df_Ld = pd.DataFrame(Ld_map, index=id_list, columns=iq_list)
-    df_Lq = pd.DataFrame(Lq_map, index=id_list, columns=iq_list)
+        flat_results.extend(process_data)
+        
+    data_rows = []
+    for beta_val, id_val, iq_val, lambda_d, lambda_q in flat_results:
+        # 전류 크기(idq) 역산 혹은 원본 인덱싱 매칭을 위해 계산 (또는 IDQ에서 직접 찾기)
+        idq_val = round(np.sqrt(id_val**2 + iq_val**2), 2)
+        
+        scaled_lambda_d = round(lambda_d * 8000.0, 2)
+        scaled_lambda_q = round(lambda_q * 8000.0, 2)
+        
+        data_rows.append({
+            'Beta': beta_val,
+            'I_dq': idq_val,
+            'Lambda_d': scaled_lambda_d,
+            'Lambda_q': scaled_lambda_q
+        })
+        
+    df_results = pd.DataFrame(data_rows)
     
-    df_Ld.to_csv("Ld_map.csv", encoding="utf-8-sig")
-    df_Lq.to_csv("Lq_map.csv", encoding="utf-8-sig")
-    print(" Ld_map.csv 및 Lq_map.csv 저장 완료!")
+    # 6. 행: Beta(위상각), 열: I_dq(전류크기) 형태로 피벗 테이블 변환
+    df_lambda_d_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_d')
+    df_lambda_q_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_q')
+    
+    # 7. 각각 별도의 CSV 파일로 저장
+    file_d = "Lambda_d_matrix.csv"
+    file_q = "Lambda_q_matrix.csv"
+    
+    df_lambda_d_pivot.to_csv(file_d, encoding="utf-8-sig")
+    df_lambda_q_pivot.to_csv(file_q, encoding="utf-8-sig")
+    
+    print(f" '{file_d}' 및 '{file_q}' 저장 완료! (행: 위상각°, 열: 전류크기A)")
 
-    return id_list, iq_list, Ld_map, Lq_map
+    return df_lambda_d_pivot, df_lambda_q_pivot
 
 if __name__ == '__main__':
     import multiprocessing
     multiprocessing.freeze_support()
     
-    id_list, iq_list, Ld_map, Lq_map = calculate_dq_inductance_map_parallel()
+    df_d, df_q = calculate_dq_inductance_map_parallel()
