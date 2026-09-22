@@ -9,7 +9,7 @@ from multiprocessing import Pool, cpu_count
 
 def worker_process(args):
     """
-    개별 프로세스가 할당받은 (beta_val, id_val, iq_val) 조합 리스트를 순회하며 FEMM 해석을 수행하는 함수
+    개별 프로세스가 할당받은 (beta_val, id_val, iq_val) 조합 리스트를 순회하며 FEMM 해석 및 토크 추출을 수행하는 함수
     """
     worker_id, task_chunk, base_fem_path = args
     
@@ -54,8 +54,17 @@ def worker_process(args):
                                      lambda_b * np.sin(theta_r - 2.0*np.pi/3.0) + 
                                      lambda_c * np.sin(theta_r + 2.0*np.pi/3.0))
             
-            results.append((beta_val, id_val, iq_val, lambda_d, lambda_q))
-            print(f"[Worker {worker_id}] Beta: {beta_val}°, Id: {id_val:.2f}, Iq: {iq_val:.2f} 완료")
+            # 6. 발생 토크 추출 (회전자 영역 블록 적분 기준: 토크는 보통 block integral code 2번)
+            # 만약 회전자에 특정 그룹 번호가 지정되어 있다면 mo_selectgroup() 후 적분 수행 필요
+            femm.mo_clearblock()
+            # 회전자 전체 영역을 선택하여 토크 계산 (회전자의 블록 레이블 선택 또는 그룹 선택 활용)
+            # 여기서는 편의상 전체 영역 토크 적분 함수 이용 (또는 mo_getprobleminfo 활용 가능)
+            # 아래 코드는 일반적인 회전자 토크 적분 방식 예시입니다.
+            femm.mo_groupselectblock(1)
+            torque_val = femm.mo_blockintegral(22)  # 2: Torque via Weighted Stress Tensor
+            
+            results.append((beta_val, id_val, iq_val, lambda_d, lambda_q, torque_val))
+            print(f"[Worker {worker_id}] Beta: {beta_val}°, Id: {id_val:.2f}, Iq: {iq_val:.2f} 완료 (Torque: {torque_val:.4f})")
                 
     finally:
         # 작업 종료 후 FEMM 닫기 및 임시 파일 정리
@@ -82,7 +91,7 @@ def calculate_dq_inductance_map_parallel():
     id_grid = IDQ * np.cos(np.radians(IBETA))
     iq_grid = IDQ * np.sin(np.radians(IBETA))
     
-    # 1. 모든 (beta, id, iq) 조합 리스트 생성 (추적을 위해 beta값도 함께 묶음)
+    # 1. 모든 (beta, id, iq) 조합 리스트 생성
     all_tasks = []
     for beta_val, id_row, iq_row in zip(ibeta_list, id_grid, iq_grid):
         for id_val, iq_val in zip(id_row, iq_row):
@@ -130,24 +139,27 @@ def calculate_dq_inductance_map_parallel():
     print(f" 총 소요 시간      : {int(elapsed_min)}분 {remaining_sec:.2f}초 (총 {elapsed_sec:.2f}초)")
     print(f"==================================================")
     
-    # 5. 결과를 평탄화하여 데이터프레임으로 변환 (8000 곱하기 및 소수점 2째 자리 반올림 적용)
+    # 5. 결과를 평탄화하여 데이터프레임으로 변환 (8배수 및 스케일링 적용)
     flat_results = []
     for process_data in chunk_results:
         flat_results.extend(process_data)
         
     data_rows = []
-    for beta_val, id_val, iq_val, lambda_d, lambda_q in flat_results:
-        # 전류 크기(idq) 역산 혹은 원본 인덱싱 매칭을 위해 계산 (또는 IDQ에서 직접 찾기)
+    for beta_val, id_val, iq_val, lambda_d, lambda_q, torque_val in flat_results:
         idq_val = round(np.sqrt(id_val**2 + iq_val**2), 2)
         
         scaled_lambda_d = round(lambda_d * 8000.0, 2)
         scaled_lambda_q = round(lambda_q * 8000.0, 2)
         
+        # 1/8 대칭 모델이므로 토크 역시 전체 모터 기준으로 맞추기 위해 8배 적용 및 반올림
+        scaled_torque = round(torque_val * 8.0, 2)
+        
         data_rows.append({
             'Beta': beta_val,
             'I_dq': idq_val,
             'Lambda_d': scaled_lambda_d,
-            'Lambda_q': scaled_lambda_q
+            'Lambda_q': scaled_lambda_q,
+            'Torque': scaled_torque
         })
         
     df_results = pd.DataFrame(data_rows)
@@ -155,20 +167,23 @@ def calculate_dq_inductance_map_parallel():
     # 6. 행: Beta(위상각), 열: I_dq(전류크기) 형태로 피벗 테이블 변환
     df_lambda_d_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_d')
     df_lambda_q_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_q')
+    df_torque_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Torque')
     
     # 7. 각각 별도의 CSV 파일로 저장
-    file_d = "Lambda_d_matrix.csv"
-    file_q = "Lambda_q_matrix.csv"
+    file_d = "FEMM_Lambda_d_matrix.csv"
+    file_q = "FEMM_Lambda_q_matrix.csv"
+    file_t = "FEMM_Torque_matrix.csv"
     
     df_lambda_d_pivot.to_csv(file_d, encoding="utf-8-sig")
     df_lambda_q_pivot.to_csv(file_q, encoding="utf-8-sig")
+    df_torque_pivot.to_csv(file_t, encoding="utf-8-sig")
     
-    print(f" '{file_d}' 및 '{file_q}' 저장 완료! (행: 위상각°, 열: 전류크기A)")
+    print(f" '{file_d}', '{file_q}', '{file_t}' 저장 완료! (행: 위상각°, 열: 전류크기A)")
 
-    return df_lambda_d_pivot, df_lambda_q_pivot
+    return df_lambda_d_pivot, df_lambda_q_pivot, df_torque_pivot
 
 if __name__ == '__main__':
     import multiprocessing
     multiprocessing.freeze_support()
     
-    df_d, df_q = calculate_dq_inductance_map_parallel()
+    df_d, df_q, df_t = calculate_dq_inductance_map_parallel()

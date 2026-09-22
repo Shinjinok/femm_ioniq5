@@ -1,4 +1,4 @@
-import Ioniq5_ev_model as ev_model
+import FEMM_Ioniq5_ev_model as ev_model
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -23,11 +23,11 @@ print(f'시간 배열 크기: {time.shape}')
 # 3. 제어기(PI Controller) 변수 초기화
 # ==========================================
 # 속도 제어기 게인
-Kp_spd, Ki_spd = 0.2, 5.0
+Kp_spd, Ki_spd = 1, 0
 integral_spd_err = 0.0
 
 # 전류 제어기 게인 (d축, q축)
-Kp_i, Ki_i = 2.0, 50.0
+Kp_i, Ki_i = 10, 0
 integral_id_err = 0.0
 integral_iq_err = 0.0
 
@@ -67,7 +67,7 @@ for k in range(N):
   spd_err = omega_r_ref - omega_r
   integral_spd_err += spd_err * dt
   iq_ref = Kp_spd * spd_err + Ki_spd * integral_spd_err
-  iq_ref = np.clip(iq_ref, -20, 20)  # 전류 지령 제한
+  iq_ref = np.clip(iq_ref, -350, 350)  # 전류 지령 제한
   id_ref = 0  # SPMSM이므로 d축 전류는 0으로 제어
 
   # --- [2] 피드백 전류 측정 및 dq 변환 ---

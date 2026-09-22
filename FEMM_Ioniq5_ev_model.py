@@ -10,14 +10,14 @@ from scipy.interpolate import interp1d
 Rs = 1.2  # 고정자 저항 [ohm]
 phi_m = 0.12  # 영구자석 쇄교자속 [Wb]
 Rs_matrix = Rs * np.eye(3)
-J = 0.0015  # 회전자 관성모멘트 [kg*m^2]
-B = 0.0001  # 마찰계수 [N*m*s/rad]
+J = 0.15  # 회전자 관성모멘트 [kg*m^2]
+B = 0.01  # 마찰계수 [N*m*s/rad]
 T_load = 0.5  # 부하 토크 [N*m]
 pole_pairs = 4  # 극쌍수 (필요시 설정)
 
 
 def load_and_interpolate_inductance(
-    csv_filename="ioniq5-13.FEM_inductance_table_1.csv",
+    csv_filename="ioniq5-13.FEM_inductance_table.csv",
 ):
   if not os.path.exists(csv_filename):
     raise FileNotFoundError(f"파일을 찾을 수 없습니다: {csv_filename}")
@@ -40,7 +40,7 @@ def load_and_interpolate_inductance(
   return interpolators, df
 # 인덕턴스 테이블 로드 및 보간기 생성
 interpolators, df_table = load_and_interpolate_inductance(
-    "ioniq5-13.FEM_inductance_table_1.csv"
+    "ioniq5-13.FEM_inductance_table.csv"
 )
 
 
