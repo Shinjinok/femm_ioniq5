@@ -1,63 +1,73 @@
 import numpy as np
 import pandas as pd
-from FEMM_Ioniq5_ev_model import interpolators, get_inductance_matrix
+import FEMM_Ioniq5_ev_model as femm_model
 
-def generate_idq_inductance_table():
+def generate_idq_flux_linkage_table():
     # 1. 조건 설정
     # 베타 각도: 90도 ~ 180도 (5도 간격) -> 세로축 (행)
     beta_list = np.arange(90, 181, 5)
     # 전류 크기(Idq): 0A ~ 340A (34A 간격) -> 가로축 (열)
     idq_list = np.arange(0, 341, 34)
     
-    theta_r = 0.0  # 전기각 고정
+    theta_e = 0.0  # 전기각 고정
     data_rows = []
 
-    print("전류 크기(Idq) 및 베타 각도에 따른 인덕턴스 매핑 연산 중...")
+    print("전류 크기(Idq) 및 베타 각도에 따른 쇄교자속(Flux Linkage) 매핑 연산 중...")
 
     for beta in beta_list:
         beta_rad = np.radians(beta)
         for idq in idq_list:
-            # Idq 전류 크기와 베타 각도로부터 d-q 축 전류(id, iq) 역산
-            id_val = idq * np.cos(beta_rad)
-            iq_val = idq * np.sin(beta_rad)
 
-            # 1) Park/Clark 변환 역과정으로 3상 전류(i_abc) 계산
-            ia = id_val * np.cos(theta_r) - iq_val * np.sin(theta_r)
-            ib = id_val * np.cos(theta_r - 2.0*np.pi/3.0) - iq_val * np.sin(theta_r - 2.0*np.pi/3.0)
-            ic = -ia - ib
-            i_abc = np.array([ia, ib, ic])
+            Ls = femm_model.get_inductance_matrix(idq, theta_e)
+            i_abc = femm_model.dq_to_abc(np.array([idq, 0]), beta_rad)  # Idq -> abc 변환
+            cos_f =np.array([np.cos(theta_e), np.cos(theta_e - 2 * np.pi / 3), np.cos(beta_rad + 2 * np.pi / 3)])
+            lambda_abc = np.dot(Ls, i_abc) + femm_model.phi_m * cos_f
+            # 쇄교자속 계산
+            print(f"lamda_abc: {lambda_abc}")
+            #lambda_d, lambda_q = femm_model.abc_to_dq(lambda_abc, theta_e)
+            # 4) [핵심] 3상 쇄교자속(lambda_abc)을 d-q축 쇄교자속으로 변환 (Park 변환)
+            cos_th = np.cos(beta_rad)
+            sin_th = np.sin(beta_rad)
+            cos_th_120 = np.cos(beta_rad - 2.0 * np.pi / 3.0)
+            sin_th_120 = np.sin(beta_rad - 2.0 * np.pi / 3.0)
+            cos_th_p120 = np.cos(beta_rad + 2.0 * np.pi / 3.0)
+            sin_th_p120 = np.sin(beta_rad + 2.0 * np.pi / 3.0)
 
-            # 2) 모델의 인덕턴스 행렬 함수 호출 (3x3 Ls matrix)
-            Ls = get_inductance_matrix(i_abc, theta_r)
+            # Park 변환 공식 적용
+            lambda_d = (2.0 / 3.0) * (
+                lambda_abc[0] * cos_th + 
+                lambda_abc[1] * cos_th_120 + 
+                lambda_abc[2] * cos_th_p120
+            )
 
-            # 3) d-q 축 및 3상 주요 인덕턴스 성분 추출
-            l_d_val = Ls[0, 0] * 1000.0  # 단위 mH 변환 예시
-            l_q_val = Ls[1, 1] * 1000.0
-
+            lambda_q = -(2.0 / 3.0) * (
+                lambda_abc[0] * sin_th + 
+                lambda_abc[1] * sin_th_120 + 
+                lambda_abc[2] * sin_th_p120
+            )
             data_rows.append({
                 'Beta': beta,
                 'Idq': float(idq),
-                'L_d_mH': round(l_d_val, 4),
-                'L_q_mH': round(l_q_val, 4),
-                'L_11_uH': round(Ls[0, 0] * 1e6, 2)  # 3상 a상 자기인덕턴스 (uH)
+                'Lambda_d_Wb': round(lambda_d*1000, 2),          # d축 쇄교자속 (Wb)
+                'Lambda_q_Wb': round(lambda_q*1000, 2),         # q축 쇄교자속 (Wb)
             })
 
     df_results = pd.DataFrame(data_rows)
 
     # 4. 피벗 테이블 변환 (가로축: Idq 전류 크기, 세로축: Beta 각도)
-    df_ld_pivot = df_results.pivot(index='Beta', columns='Idq', values='L_d_mH')
-    df_lq_pivot = df_results.pivot(index='Beta', columns='Idq', values='L_q_mH')
-    df_l11_pivot = df_results.pivot(index='Beta', columns='Idq', values='L_11_uH')
+    df_lambdad_pivot = df_results.pivot(index='Beta', columns='Idq', values='Lambda_d_Wb')
+    df_lambdaq_pivot = df_results.pivot(index='Beta', columns='Idq', values='Lambda_q_Wb')
+
 
     # 5. CSV 파일로 저장
-    df_ld_pivot.to_csv("Inductance_Ld_Idq_matrix.csv", encoding="utf-8-sig")
-    df_lq_pivot.to_csv("Inductance_Lq_Idq_matrix.csv", encoding="utf-8-sig")
-    df_l11_pivot.to_csv("Inductance_Phase_L11_Idq_matrix.csv", encoding="utf-8-sig")
+    df_lambdad_pivot.to_csv("모델로부터Lambda_d_Idq_matrix.csv", encoding="utf-8-sig")
+    df_lambdaq_pivot.to_csv("모델로부터Lambda_q_Idq_matrix.csv", encoding="utf-8-sig")
 
-    print("=== Idq 및 베타 각도 기준 인덕턴스 맵 테이블 생성 및 CSV 저장 완료 ===")
-    print("저장된 파일: Inductance_Ld_Idq_matrix.csv, Inductance_Lq_Idq_matrix.csv, Inductance_Phase_L11_Idq_matrix.csv")
 
-    return df_ld_pivot, df_lq_pivot
+    print("=== Idq 및 베타 각도 기준 쇄교자속 맵 테이블 생성 및 CSV 저장 완료 ===")
+    print("저장된 파일: 모델로부터Lambda_d_Idq_matrix.csv, 모델로부터Lambda_q_Idq_matrix.csv")
+
+    return df_lambdad_pivot, df_lambdaq_pivot
 
 if __name__ == '__main__':
-    generate_idq_inductance_table()
+    generate_idq_flux_linkage_table()

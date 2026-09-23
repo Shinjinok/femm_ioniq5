@@ -8,13 +8,14 @@ from scipy.interpolate import interp1d
 # 1. 전역 상수 및 파라미터 선언
 # ==========================================
 Rs = 1.2  # 고정자 저항 [ohm]
-phi_m = 0.12  # 영구자석 쇄교자속 [Wb]
+phi_m = 0.13505  # 영구자석 쇄교자속 [Wb]
 Rs_matrix = Rs * np.eye(3)
 J = 0.15  # 회전자 관성모멘트 [kg*m^2]
 B = 0.01  # 마찰계수 [N*m*s/rad]
 T_load = 0.5  # 부하 토크 [N*m]
 pole_pairs = 4  # 극쌍수 (필요시 설정)
 
+DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
 
 def load_and_interpolate_inductance(
     csv_filename="ioniq5-13.FEM_inductance_table.csv",
@@ -44,19 +45,19 @@ interpolators, df_table = load_and_interpolate_inductance(
 )
 
 
-def get_inductance_matrix(i_abc, theta_e):
+def get_inductance_matrix(i_dq, theta_e):
   """현재 상전류 크기 및 회전자 각도를 반영하여 안정적인 3x3 인덕턴스 행렬 구성"""
-  i_norm = np.max(np.abs(i_abc))
+  #i_norm = np.max(np.abs(i_abc))
 
-  La = float(interpolators["Laa_Center_uH"](i_norm)) * 1e-6
-  Lb = float(interpolators["Laa_Amplitude_uH"](i_norm)) * 1e-6
-
-  La2 = float(interpolators["Lab_Center_uH"](i_norm)) * 1e-6
-  Lb2 = float(interpolators["Lab_Amplitude_uH"](i_norm)) * 1e-6
-
-  La3 = float(interpolators["Lac_Center_uH"](i_norm)) * 1e-6
-  Lb3 = float(interpolators["Lac_Amplitude_uH"](i_norm)) * 1e-6
-
+  La = float(interpolators["Laa_Center_uH"](i_dq)) * 1e-6
+  Lb = float(interpolators["Laa_Amplitude_uH"](i_dq)) * 1e-6
+  
+  La2 = float(interpolators["Lab_Center_uH"](i_dq)) * 1e-6
+  Lb2 = float(interpolators["Lab_Amplitude_uH"](i_dq)) * 1e-6
+  
+  La3 = float(interpolators["Lac_Center_uH"](i_dq)) * 1e-6
+  Lb3 = float(interpolators["Lac_Amplitude_uH"](i_dq)) * 1e-6
+  
   l11 = La - Lb * np.cos(2 * theta_e)
   l12 = La2 - Lb2 * np.cos(2 * theta_e - 2 * np.pi / 3)
   l13 = La3 - Lb3 * np.cos(2 * theta_e + 2 * np.pi / 3)
@@ -68,6 +69,11 @@ def get_inductance_matrix(i_abc, theta_e):
   l33 = La - Lb * np.cos(2 * theta_e - 2 * np.pi / 3)
 
   Ls = np.array([[l11, l12, l13], [l21, l22, l23], [l31, l32, l33]])
+  if 0:
+    print(f"i_norm: {i_norm}, La: {La}, Lb: {Lb}")
+    print(f"i_norm: {i_norm}, La2: {La2}, Lb2: {Lb2}")
+    print(f"i_norm: {i_norm}, La3: {La3}, Lb3: {Lb3}")
+    print(f"Inductance Matrix Ls:\n{Ls}")
   return Ls
 
 

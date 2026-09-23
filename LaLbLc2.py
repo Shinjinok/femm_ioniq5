@@ -23,14 +23,13 @@ def worker_process(args):
     pythoncom.CoInitialize()  # Windows COM 초기화
     
     worker_id, task_chunk, base_fem_path, magnet_material_name, rotor_group_no, pole_pairs, ia_val, phase = args
-    process_fem_path = f"model_worker_{worker_id}.fem"
+    process_fem_path = f"temp_model_worker_{worker_id}.fem"
     
     results = []
     
     try:
         for theta_e_rad in task_chunk:
-            theta_e_deg = np.degrees(theta_e_rad)
-            theta_m_deg = theta_e_deg / pole_pairs
+           
             
             if os.path.exists(process_fem_path):
                 os.remove(process_fem_path)
@@ -48,17 +47,11 @@ def worker_process(args):
                 pass
 
             # 2. A상 고정 전류 설정, B상/C상은 0A
-            if phase == 'A':femm.mi_setcurrent('A', ia_val)
-            if phase == 'B':femm.mi_setcurrent('B', ia_val)
-            if phase == 'C':femm.mi_setcurrent('C', ia_val)
+            if phase == 'A':femm.mi_setcurrent('A', ia_val[0])
+            if phase == 'B':femm.mi_setcurrent('B', ia_val[1])
+            if phase == 'C':femm.mi_setcurrent('C', ia_val[2])
 
-            # 3. 회전자 기계각 회전 적용
-            if rotor_group_no is not None and theta_m_deg != 0.0:
-                femm.mi_seteditmode("group")
-                femm.mi_clearselected()
-                femm.mi_selectgroup(rotor_group_no)
-                femm.mi_moverotate(0.0, 0.0, theta_m_deg)
-            
+                       
             # 4. 해석 실행 및 솔루션 로드
             femm.mi_analyze(1)
             femm.mi_loadsolution()

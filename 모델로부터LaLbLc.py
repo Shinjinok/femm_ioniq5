@@ -67,8 +67,8 @@ def worker_process(args):
             _, _, lambda_a = femm.mo_getcircuitproperties('A')
             _, _, lambda_b = femm.mo_getcircuitproperties('B')
             _, _, lambda_c = femm.mo_getcircuitproperties('C')
-            
-            results.append((theta_e_rad, theta_e_deg, theta_m_deg, ia_val, lambda_a, lambda_b, lambda_c))
+
+            results.append((theta_e_rad, theta_e_deg, theta_m_deg, ia_val, lambda_a *8, lambda_b*8, lambda_c*8))
             femm.closefemm()
             
     finally:
