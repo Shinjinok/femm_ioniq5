@@ -59,14 +59,14 @@ def get_inductance_matrix(i_dq, theta_e):
   Lb3 = float(interpolators["Lac_Amplitude_uH"](i_dq)) * 1e-6
   
   l11 = La - Lb * np.cos(2 * theta_e)
-  l12 = La2 - Lb2 * np.cos(2 * theta_e - 2 * np.pi / 3)
-  l13 = La3 - Lb3 * np.cos(2 * theta_e + 2 * np.pi / 3)
+  l12 = La2 + Lb2 * np.cos( 2 * theta_e - 2/3*np.pi)
+  l13 = La3 + Lb3 * np.cos( 2 * theta_e + 2/3*np.pi)
   l21 = l12
-  l22 = La - Lb * np.cos(2 * theta_e + 2 * np.pi / 3)
-  l23 = La2 - Lb2 * np.cos(2 * theta_e)
+  l22 = La - Lb * np.cos(2 * theta_e + 2/3 * np.pi)
+  l23 = La2 + Lb2 * np.cos(2 * theta_e)
   l31 = l13
   l32 = l23
-  l33 = La - Lb * np.cos(2 * theta_e - 2 * np.pi / 3)
+  l33 = La - Lb * np.cos(2 *theta_e - 2/3 * np.pi)
 
   Ls = np.array([[l11, l12, l13], [l21, l22, l23], [l31, l32, l33]])
   if 0:
@@ -111,6 +111,21 @@ def dq_to_abc(v_dq, theta_e):
   vb = -0.5 * v_alpha + (np.sqrt(3) / 2.0) * v_beta
   vc = -0.5 * v_alpha - (np.sqrt(3) / 2.0) * v_beta
   return np.array([va, vb, vc])
+
+def idq_to_abc(i_d, beta_rad):
+  """
+    d-q축 전류 벡터를 3상(abc) 전류로 변환하는 함수
+    
+       Returns:
+    - numpy.ndarray: [ia, ib, ic] 3상 전류 값 (A)
+  """
+  Iq = 0.0
+  # 각 상별 변환 계산
+  ia = i_d * np.cos(beta_rad) - Iq * np.sin(beta_rad)
+  ib = i_d * np.cos(beta_rad - 2.0 * np.pi / 3.0) - Iq * np.sin(beta_rad - 2.0 * np.pi / 3.0)
+  ic = i_d * np.cos(beta_rad + 2.0 * np.pi / 3.0) - Iq * np.sin(beta_rad + 2.0 * np.pi / 3.0)
+    
+  return np.array([ia, ib, ic])
 
 
 def S_func(theta_e):

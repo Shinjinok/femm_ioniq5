@@ -158,7 +158,7 @@ def calculate_torque_and_save_plots(
 
 
 def main():
-    base_file_path = "ioniq5-6.FEM"  # 원본 FEM 파일 경로
+    base_file_path = "ioniq5-13.FEM"  # 원본 FEM 파일 경로
 
     if not os.path.exists(base_file_path):
         print(f"오류: {base_file_path} 파일을 찾을 수 없습니다.")

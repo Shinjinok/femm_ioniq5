@@ -11,6 +11,7 @@ def generate_idq_flux_linkage_table():
     
     theta_e = 0.0  # 전기각 고정
     data_rows = []
+    #Ll=1e-4*np.eye(3)  # 임의의 인덕턴스 행렬 초기화
 
     print("전류 크기(Idq) 및 베타 각도에 따른 쇄교자속(Flux Linkage) 매핑 연산 중...")
 
@@ -19,19 +20,26 @@ def generate_idq_flux_linkage_table():
         for idq in idq_list:
 
             Ls = femm_model.get_inductance_matrix(idq, theta_e)
-            i_abc = femm_model.dq_to_abc(np.array([idq, 0]), beta_rad)  # Idq -> abc 변환
-            cos_f =np.array([np.cos(theta_e), np.cos(theta_e - 2 * np.pi / 3), np.cos(beta_rad + 2 * np.pi / 3)])
-            lambda_abc = np.dot(Ls, i_abc) + femm_model.phi_m * cos_f
+            if beta == 90:
+                if idq == 340:
+                    print(f"Initial Ls matrix at Beta={beta}°, Idq={idq}A:\n{Ls}")
+                
+            #Ls = Ls + Ll
+            i_abc = femm_model.idq_to_abc(idq, beta_rad)  # Idq -> abc 변환
+            cos_f =np.array([np.cos(theta_e), 
+                             np.cos(theta_e - 2 * np.pi / 3), 
+                             np.cos(theta_e + 2 * np.pi / 3)])
+            lambda_abc = Ls @ i_abc + femm_model.phi_m * cos_f
             # 쇄교자속 계산
-            print(f"lamda_abc: {lambda_abc}")
+            #print(f"lamda_abc: {lambda_abc}")
             #lambda_d, lambda_q = femm_model.abc_to_dq(lambda_abc, theta_e)
             # 4) [핵심] 3상 쇄교자속(lambda_abc)을 d-q축 쇄교자속으로 변환 (Park 변환)
-            cos_th = np.cos(beta_rad)
-            sin_th = np.sin(beta_rad)
-            cos_th_120 = np.cos(beta_rad - 2.0 * np.pi / 3.0)
-            sin_th_120 = np.sin(beta_rad - 2.0 * np.pi / 3.0)
-            cos_th_p120 = np.cos(beta_rad + 2.0 * np.pi / 3.0)
-            sin_th_p120 = np.sin(beta_rad + 2.0 * np.pi / 3.0)
+            cos_th = np.cos(theta_e)
+            sin_th = np.sin(theta_e)
+            cos_th_120 = np.cos(theta_e - 2.0 * np.pi / 3.0)
+            sin_th_120 = np.sin(theta_e - 2.0 * np.pi / 3.0)
+            cos_th_p120 = np.cos(theta_e + 2.0 * np.pi / 3.0)
+            sin_th_p120 = np.sin(theta_e + 2.0 * np.pi / 3.0)
 
             # Park 변환 공식 적용
             lambda_d = (2.0 / 3.0) * (
