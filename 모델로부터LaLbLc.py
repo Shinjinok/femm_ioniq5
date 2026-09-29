@@ -56,7 +56,11 @@ def worker_process(args):
             if rotor_group_no is not None and theta_m_deg != 0.0:
                 femm.mi_seteditmode("group")
                 femm.mi_clearselected()
-                femm.mi_selectgroup(rotor_group_no)
+                if isinstance(rotor_group_no, (list, tuple)):
+                    for g_no in rotor_group_no:
+                        femm.mi_selectgroup(g_no)
+                else:
+                    femm.mi_selectgroup(rotor_group_no)
                 femm.mi_moverotate(0.0, 0.0, theta_m_deg)
             
             # 4. 해석 실행 및 솔루션 로드
@@ -142,7 +146,7 @@ def run_multi_current_sweep():
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
     magnet_material_name = "Mag" 
-    rotor_group_no = 1 
+    rotor_group_no = [1,20] 
     pole_number = 8 
     pole_pairs = pole_number / 2 
 

@@ -7,6 +7,26 @@ import pandas as pd
 import femm
 from multiprocessing import Pool, cpu_count
 
+def abc_to_dq(i_abc, b):
+  
+  #dq = np.array([0, 0])
+  clac=2/3*np.array([[1, -1/2, -1/2], 
+                     [0,np.sqrt(3)/2, -np.sqrt(3)/2]])
+  park=np.array([[np.cos(b), np.sin(b)], 
+                 [-np.sin(b), np.cos(b)]])
+  dq= park@clac@i_abc
+  return dq
+
+
+def dq_to_abc(v_dq, b):
+  clac=np.array([[1, -1/2, -1/2], 
+                 [0,np.sqrt(3)/2, -np.sqrt(3)/2]])
+  iclac=np.transpose(clac)
+  ipark=np.array([[np.cos(b), -np.sin(b)], 
+                  [np.sin(b), np.cos(b)]])
+  v=iclac@ipark@v_dq
+  return v
+
 def worker_process(args):
     """
     개별 프로세스가 할당받은 (beta_val, id_val, iq_val) 조합 리스트를 순회하며 FEMM 해석 및 토크 추출을 수행하는 함수
@@ -27,9 +47,8 @@ def worker_process(args):
     try:
         for beta_val, id_val, iq_val in task_chunk:
             # 1. Park/Clark 변환 역과정 (3상 전류 계산)
-            ia = id_val * np.cos(theta_r) - iq_val * np.sin(theta_r)
-            ib = id_val * np.cos(theta_r - 2.0*np.pi/3.0) - iq_val * np.sin(theta_r - 2.0*np.pi/3.0)
-            ic = -ia - ib
+            
+            ia,ib,ic = dq_to_abc(np.array([id_val,iq_val]),theta_r)
             
             # 2. 회로 전류 설정
             femm.mi_setcurrent('A', ia)
@@ -46,13 +65,8 @@ def worker_process(args):
             _, _, lambda_c = femm.mo_getcircuitproperties('C')
             
             # 5. d-q 축 자속 변환
-            lambda_d = 2.0 / 3.0 * (lambda_a * np.cos(theta_r) + 
-                                    lambda_b * np.cos(theta_r - 2.0*np.pi/3.0) + 
-                                    lambda_c * np.cos(theta_r + 2.0*np.pi/3.0))
-                                    
-            lambda_q = -2.0 / 3.0 * (lambda_a * np.sin(theta_r) + 
-                                     lambda_b * np.sin(theta_r - 2.0*np.pi/3.0) + 
-                                     lambda_c * np.sin(theta_r + 2.0*np.pi/3.0))
+            
+            lambda_d,lambda_q = abc_to_dq(np.array([lambda_a,lambda_b,lambda_c]),theta_r)
             
             # 6. 발생 토크 추출 (회전자 영역 블록 적분 기준: 토크는 보통 block integral code 2번)
             # 만약 회전자에 특정 그룹 번호가 지정되어 있다면 mo_selectgroup() 후 적분 수행 필요

@@ -25,7 +25,7 @@ def generate_idq_flux_linkage_table():
                     print(f"Initial Ls matrix at Beta={beta}°, Idq={idq}A:\n{Ls}")
                 
             #Ls = Ls + Ll
-            i_abc = femm_model.idq_to_abc(idq, beta_rad)  # Idq -> abc 변환
+            i_abc = femm_model.dq_to_abc(np.array([idq,0]), beta_rad)  # Idq -> abc 변환
             cos_f =np.array([np.cos(theta_e), 
                              np.cos(theta_e - 2 * np.pi / 3), 
                              np.cos(theta_e + 2 * np.pi / 3)])

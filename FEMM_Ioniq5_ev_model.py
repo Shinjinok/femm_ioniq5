@@ -82,50 +82,25 @@ def get_inductance_matrix(i_dq, theta_e):
 # ==========================================
 # 2. 파크/클라크 변환 함수 정의
 # ==========================================
-def abc_to_dq(i_abc, theta_e):
-  ia, ib, ic = i_abc
-  cos_th = np.cos(theta_e)
-  sin_th = np.sin(theta_e)
-
-  # Clark 변환 (abc -> alpha-beta)
-  i_alpha = (2.0 / 3.0) * (ia - 0.5 * ib - 0.5 * ic)
-  i_beta = (2.0 / 3.0) * ((np.sqrt(3) / 2.0) * ib - (np.sqrt(3) / 2.0) * ic)
-
-  # Park 변환 (alpha-beta -> dq)
-  id_val = i_alpha * cos_th + i_beta * sin_th
-  iq_val = -i_alpha * sin_th + i_beta * cos_th
-  return np.array([id_val, iq_val])
+def abc_to_dq(i_abc, b):
+  
+  #dq = np.array([0, 0])
+  clac=2/3*np.array([[1, -1/2, -1/2], 
+                     [0,np.sqrt(3)/2, -np.sqrt(3)/2]])
+  park=np.array([[np.cos(b), np.sin(b)], 
+                 [-np.sin(b), np.cos(b)]])
+  dq= park@clac@i_abc
+  return dq
 
 
-def dq_to_abc(v_dq, theta_e):
-  vd, vq = v_dq
-  cos_th = np.cos(theta_e)
-  sin_th = np.sin(theta_e)
-
-  # 역 Park 변환 (dq -> alpha-beta)
-  v_alpha = vd * cos_th - vq * sin_th
-  v_beta = vd * sin_th + vq * cos_th
-
-  # 역 Clark 변환 (alpha-beta -> abc)
-  va = v_alpha
-  vb = -0.5 * v_alpha + (np.sqrt(3) / 2.0) * v_beta
-  vc = -0.5 * v_alpha - (np.sqrt(3) / 2.0) * v_beta
-  return np.array([va, vb, vc])
-
-def idq_to_abc(i_d, beta_rad):
-  """
-    d-q축 전류 벡터를 3상(abc) 전류로 변환하는 함수
-    
-       Returns:
-    - numpy.ndarray: [ia, ib, ic] 3상 전류 값 (A)
-  """
-  Iq = 0.0
-  # 각 상별 변환 계산
-  ia = i_d * np.cos(beta_rad) - Iq * np.sin(beta_rad)
-  ib = i_d * np.cos(beta_rad - 2.0 * np.pi / 3.0) - Iq * np.sin(beta_rad - 2.0 * np.pi / 3.0)
-  ic = i_d * np.cos(beta_rad + 2.0 * np.pi / 3.0) - Iq * np.sin(beta_rad + 2.0 * np.pi / 3.0)
-    
-  return np.array([ia, ib, ic])
+def dq_to_abc(v_dq, b):
+  clac=np.array([[1, -1/2, -1/2], 
+                 [0,np.sqrt(3)/2, -np.sqrt(3)/2]])
+  iclac=np.transpose(clac)
+  ipark=np.array([[np.cos(b), -np.sin(b)], 
+                  [np.sin(b), np.cos(b)]])
+  v=iclac@ipark@v_dq
+  return v
 
 
 def S_func(theta_e):
