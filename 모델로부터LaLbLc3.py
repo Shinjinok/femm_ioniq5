@@ -7,6 +7,7 @@ import pandas as pd
 import pythoncom
 import femm
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # 3D 그래프용 모듈
 from multiprocessing import Pool, cpu_count
 
 # 한글 폰트 깨짐 방지 (Windows 환경 기준)
@@ -67,15 +68,13 @@ def worker_process(args):
             femm.mi_analyze(1)
             femm.mi_loadsolution()
             
-            # [추가] 각 해석(.ans 결과) 화면을 이미지(비트맵)로 저장
-            # 뷰 옵션 설정 (예: 1번 플롯/밀도 플롯 표시 등, 필요시 커스텀 가능)
+            # 각 해석 결과 화면을 비트맵 이미지로 저장
             try:
                 ans_image_dir = f"ans_images_{int(ia_val)}A"
                 os.makedirs(ans_image_dir, exist_ok=True)
                 ans_image_path = os.path.abspath(os.path.join(ans_image_dir, f"flux_dist_theta_{int(theta_e_deg)}deg.png"))
                 
-                # 자속 밀도 맵 및 메쉬 등 표시 설정 후 비트맵 저장
-                femm.mo_showdensityplot(1, 0, 2.0, 0.0, "b") # 자속밀도 컬러맵 표시
+                femm.mo_showdensityplot(1, 0, 2.0, 0.0, "b")
                 femm.main_resize(1000, 1000)
                 femm.mo_zoom(-100, -100, 100, 100)
                 femm.mo_savebitmap(ans_image_path)
@@ -154,7 +153,59 @@ def plot_flux_linkage_results(df_results, ia_val, output_image_path="flux_linkag
 
     plt.savefig(output_image_path, dpi=300)
     plt.close()
-    print(f"[전류 {ia_val}A 자속 파형 플롯 저장 완료] {output_image_path}")
+
+def process_and_plot_3d_phases(all_records):
+    """
+    모든 전류 및 전기각 데이터로부터 상별(A, B, C) 피벗 테이블을 생성하여 CSV로 저장하고,
+    X축: 전류, Y축: 전기각, Z축: 쇄교자속값으로 하는 3D 표면 그래프를 생성합니다.
+    """
+    df_all = pd.DataFrame(all_records)
+    
+    # mWb 단위 변환 컬럼 추가
+    df_all['Lambda_a_mWb'] = df_all['Lambda_a'] * 1e3
+    df_all['Lambda_b_mWb'] = df_all['Lambda_b'] * 1e3
+    df_all['Lambda_c_mWb'] = df_all['Lambda_c'] * 1e3
+    
+    phases = {
+        'A': ('Lambda_a_mWb', 'flux_linkage_phase_A_pivot.csv', 'flux_linkage_3d_phase_A.png', 'A상 자속 쇄교수 3D 프로파일 (전류 vs 전기각)'),
+        'B': ('Lambda_b_mWb', 'flux_linkage_phase_B_pivot.csv', 'flux_linkage_3d_phase_B.png', 'B상 자속 쇄교수 3D 프로파일 (전류 vs 전기각)'),
+        'C': ('Lambda_c_mWb', 'flux_linkage_phase_C_pivot.csv', 'flux_linkage_3d_phase_C.png', 'C상 자속 쇄교수 3D 프로파일 (전류 vs 전기각)')
+    }
+    
+    print(f"\n==================================================")
+    print(f" [상별 통합 데이터 피벗 저장 및 3D 그래프 생성 중]")
+    print(f"==================================================")
+    
+    for phase_name, (col_name, csv_filename, img_filename, title_text) in phases.items():
+        # 피벗 테이블 생성 (행: 전기각, 열: 전류)
+        df_pivot = df_all.pivot(index='Theta_Elec_deg', columns='Current_A', values=col_name)
+        df_pivot.to_csv(csv_filename, encoding="utf-8-sig")
+        print(f" -> [{phase_name}상 피벗 CSV 저장 완료] {csv_filename}")
+        
+        # 3D 표면 그래프 그리기
+        fig = plt.figure(figsize=(11, 8))
+        ax = fig.add_subplot(projection='3d')
+        
+        X = df_pivot.columns.values  # 전류 [A]
+        Y = df_pivot.index.values    # 전기각 [deg]
+        X_grid, Y_grid = np.meshgrid(X, Y)
+        Z_grid = df_pivot.values     # 자속 쇄교수 [mWb]
+        
+        surf = ax.plot_surface(X_grid, Y_grid, Z_grid, cmap='viridis', edgecolor='none', alpha=0.9)
+        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label='자속 쇄교수 [mWb]')
+        
+        ax.set_title(title_text, fontsize=13, fontweight='bold', pad=15)
+        ax.set_xlabel('전류 [A]', fontsize=11, labelpad=10)
+        ax.set_ylabel('전기각 [deg]', fontsize=11, labelpad=10)
+        ax.set_zlabel('자속 쇄교수 [mWb]', fontsize=11, labelpad=10)
+        
+        # 입체감을 위해 시점(Elevation, Azimuth) 조정
+        ax.view_init(elev=30, azim=135)
+        
+        plt.tight_layout()
+        plt.savefig(img_filename, dpi=300)
+        plt.close()
+        print(f" -> [{phase_name}상 3D 그래프 저장 완료] {img_filename}")
 
 def run_multi_current_sweep():
     base_fem_path = "ioniq5-13.FEM"
@@ -166,10 +217,11 @@ def run_multi_current_sweep():
     pole_number = 8 
     pole_pairs = pole_number / 2 
 
-    current_list = list(np.arange(0, 341, 34))  # 테스트용 전류 설정 (필요시 확장)
-    theta_e_list = np.radians(np.arange(0, 361, 4))  # 0° ~ 360°, 16° 간격
+    current_list = [0,25,50,100,200,400]  # 0A ~ 340A, 34A 간격
+    theta_e_list = np.radians(np.arange(0, 361, 8))  # 0° ~ 360°, 4° 간격
     
     summary_records = []
+    all_records = []  # 상별 통합 저장을 위한 전체 레코드 리스트
     total_start_time = time.time()
 
     print(f"==================================================")
@@ -197,7 +249,7 @@ def run_multi_current_sweep():
         current_records = []
         for process_data in chunk_results:
             for theta_e_rad, theta_e_deg, theta_m_deg, ia, la, lb, lc in process_data:
-                current_records.append({
+                record = {
                     'Current_A': ia,
                     'Theta_Elec_deg': theta_e_deg,
                     'Theta_Mech_deg': theta_m_deg,
@@ -205,15 +257,21 @@ def run_multi_current_sweep():
                     'Lambda_a': la, 
                     'Lambda_b': lb, 
                     'Lambda_c': lc
-                })
+                }
+                current_records.append(record)
+                all_records.append(record)
 
         df_current = pd.DataFrame(current_records)
         df_current = df_current.sort_values(by='Theta_Elec_deg').reset_index(drop=True)
 
-        # 1. 각 전류별 자속 파형 그래프 저장
+        # 1. 각 전류별 상세 데이터를 개별 CSV로 저장
+        current_csv_filename = f"flux_linkage_data_{int(ia_val)}A.csv"
+        df_current.to_csv(current_csv_filename, index=False, encoding="utf-8-sig")
+
+        # 2. 각 전류별 자속 파형 그래프 저장
         plot_flux_linkage_results(df_current, ia_val=ia_val, output_image_path=f"flux_linkage_plot_{int(ia_val)}A.png")
 
-        # 2. 각 상별 자속 중심값과 진폭 계산 후 요약 리스트에 추가
+        # 3. 각 상별 자속 중심값과 진폭 계산 후 요약 리스트에 추가
         lam_a_vals = df_current['Lambda_a'] * 1e3
         lam_b_vals = df_current['Lambda_b'] * 1e3
         lam_c_vals = df_current['Lambda_c'] * 1e3
@@ -228,14 +286,18 @@ def run_multi_current_sweep():
             'Lambda_c_Amplitude_mWb': (np.max(lam_c_vals) - np.min(lam_c_vals)) / 2.0,
         })
 
+    # 전체 요약 테이블 저장
     df_summary = pd.DataFrame(summary_records)
-    summary_csv_filename = f"{base_fem_path}_flux_linkage_table.csv"
+    summary_csv_filename = f"{base_fem_path}_flux_linkage_summary_table.csv"
     df_summary.to_csv(summary_csv_filename, index=False, encoding="utf-8-sig")
+
+    # [추가] 모든 전류 해석 완료 후 상별 통합 피벗 저장 및 3D 그래프 생성
+    process_and_plot_3d_phases(all_records)
 
     total_elapsed = time.time() - total_start_time
     print(f"\n==================================================")
     print(f" 모든 전류 조건 스윕 해석 총 소요 시간: {int(total_elapsed // 60)}분 {total_elapsed % 60:.2f}초")
-    print(f" 각 전류별 자속 중심값/진폭 요약 CSV 파일 저장 완료: '{summary_csv_filename}'")
+    print(f" 전체 요약 CSV 파일 저장 완료: '{summary_csv_filename}'")
     print(f"==================================================")
 
     return df_summary
