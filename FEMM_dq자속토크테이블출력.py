@@ -98,7 +98,7 @@ def calculate_dq_inductance_map_parallel():
 
     # 전류 크기 0 ~ 340A (34A 간격), 위상각 90 ~ 180도 (5도 간격)
     idq_list = np.arange(0, 341, 34)
-    ibeta_list = np.arange(0, 181, 5)
+    ibeta_list = np.arange(-180, 181, 10)
     
     # Meshgrid를 통한 d, q 전류 격자 생성
     IDQ, IBETA = np.meshgrid(idq_list, ibeta_list)
