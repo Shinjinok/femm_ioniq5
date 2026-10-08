@@ -8,10 +8,10 @@ from ioq5_model import IPMSMSimulator
 
 # --- 강제 속도 인가 및 BEMF 측정 구동 예제 ---
 if __name__ == "__main__":
-    sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', pole_pairs=4, rs=0.0618)
+    sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', 'FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.0618)
     
     dt = 0.0001  # 100 us 샘플링 타임
-    total_time = 0.3  # 0.3초 시뮬레이션
+    total_time = 0.1  # 0.3초 시뮬레이션
     time_steps = np.arange(0, total_time, dt)
     
     # 강제로 인가할 목표 속도 설정 [RPM] (예: 3,000 RPM)

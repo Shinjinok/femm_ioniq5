@@ -4,11 +4,12 @@ from scipy.interpolate import RegularGridInterpolator
 import matplotlib.pyplot as plt
 
 class IPMSMSimulator:
-    def __init__(self, csv_d_path, csv_q_path, pole_pairs=4, rs=0.05, J=0.01, B=0.00):
+    def __init__(self, csv_d_path, csv_q_path, csv_0_path, pole_pairs=4, rs=0.05, J=0.01, B=0.00):
         """
         IPMSM 시뮬레이터 초기화
         - csv_d_path: d축 자속쇄교수 CSV 파일 경로
         - csv_q_path: q축 자속쇄교수 CSV 파일 경로
+        - csv_0_path: 0축 자속쇄교수 CSV 파일 경로
         - pole_pairs: 극쌍수 (Default: 4)
         - rs: 고정자 권선 저항 [ohm]
         - J: 회전자 관성모멘트 [kg·m^2]
@@ -22,7 +23,8 @@ class IPMSMSimulator:
         # 1. CSV 데이터 로드
         df_d = pd.read_csv(csv_d_path)
         df_q = pd.read_csv(csv_q_path)
-        
+        df_0 = pd.read_csv(csv_0_path)
+
         # Beta (전류각, 도) 및 Current (전류 크기, A) 추출
         self.betas = df_d['Beta'].values
         self.currents = df_d.columns[1:].astype(float).values
@@ -30,11 +32,12 @@ class IPMSMSimulator:
         # 자속쇄교수 행렬 추출 (단위: mWb -> Wb 변환을 위해 1e-3 곱셈 적용)
         lambda_d_mat = df_d.iloc[:, 1:].values * 1e-3
         lambda_q_mat = df_q.iloc[:, 1:].values * 1e-3
-        
+        lambda_0_mat = df_0.iloc[:, 1:].values * 1e-3
         # 2. 2차원 보간기(Interpolator) 생성 (RegularGridInterpolator 사용)
         self.interp_d = RegularGridInterpolator((self.betas, self.currents), lambda_d_mat, method='linear', bounds_error=False, fill_value=None)
         self.interp_q = RegularGridInterpolator((self.betas, self.currents), lambda_q_mat, method='linear', bounds_error=False, fill_value=None)
-        
+        self.interp_0 = RegularGridInterpolator((self.betas, self.currents), lambda_0_mat, method='linear', bounds_error=False, fill_value=None)  
+
     def get_flux(self, I, beta_deg):
         """전류 크기(I)와 전류각(beta)에 따른 d, q축 자속쇄교수 반환"""
         I_clamped = np.clip(I, self.currents[0], self.currents[-1])
@@ -43,7 +46,9 @@ class IPMSMSimulator:
         pts = np.array([[beta_clamped, I_clamped]])
         ld = self.interp_d(pts)[0]
         lq = self.interp_q(pts)[0]
-        return ld, lq
+        l0 = self.interp_0(pts)[0]
+
+        return ld, lq, l0
 
     def calculate_torque(self, ld, lq, id_, iq_):
         """전자기 토크 계산 [Nm]"""
@@ -52,7 +57,9 @@ class IPMSMSimulator:
 
     def abc_to_dq(self, i_abc, b):
         clac = 2/3 * np.array([[1, -1/2, -1/2], 
-                               [0, np.sqrt(3)/2, -np.sqrt(3)/2]])
+                               [0, np.sqrt(3)/2, -np.sqrt(3)/2]],
+                               [1/2, 1/2, 1/2]] )
+        
         park = np.array([[np.cos(b), np.sin(b)], 
                          [-np.sin(b), np.cos(b)]])
         dq = park @ clac @ i_abc
@@ -60,7 +67,8 @@ class IPMSMSimulator:
 
     def dq_to_abc(self, v_dq, b):
         clac = np.array([[1, -1/2, -1/2], 
-                         [0, np.sqrt(3)/2, -np.sqrt(3)/2]])
+                         [0, np.sqrt(3)/2, -np.sqrt(3)/2]],
+                         [1/2, 1/2, 1/2]])
         iclac = np.transpose(clac)
         ipark = np.array([[np.cos(b), -np.sin(b)], 
                           [np.sin(b), np.cos(b)]])
@@ -71,7 +79,7 @@ class IPMSMSimulator:
         """단일 샘플링 타임(dt) 동안의 모터 상태 업데이트 함수 (증분 인덕턴스 적용)"""
         theta_e = self.p * theta_m_prev
          
-        vd, vq = self.abc_to_dq(np.array([va, vb, vc]), theta_e)
+        vd, vq, v0 = self.abc_to_dq(np.array([va, vb, vc]), theta_e)
         
         # 1. 현재 전류 크기 및 전류각 계산
         current_mag = np.sqrt(id_prev**2 + iq_prev**2)
@@ -80,7 +88,7 @@ class IPMSMSimulator:
         else:
             beta_deg = np.degrees(np.arctan2(iq_prev, id_prev))
            
-        ld, lq = self.get_flux(current_mag, beta_deg)
+        ld, lq, l0 = self.get_flux(current_mag, beta_deg)
         Te = self.calculate_torque(ld, lq, id_prev, iq_prev)
         
         omega_e = self.p * wm_prev
@@ -107,7 +115,8 @@ class IPMSMSimulator:
         
         did_dt = (vd - self.Rs * id_prev + omega_e * lq) / L_d_approx
         diq_dt = (vq - self.Rs * iq_prev - omega_e * ld) / L_q_approx
-        
+
+       
         id_next = id_prev + did_dt * dt
         iq_next = iq_prev + diq_dt * dt
         
@@ -130,7 +139,7 @@ class IPMSMSimulator:
 
 # --- 시뮬레이터 구동 및 테스트 예제 ---
 if __name__ == "__main__":
-    sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', pole_pairs=4, rs=0.05)
+    sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', 'FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.05)
     
     dt = 0.001 # 100 us
     total_time = 10.0 # 1 s
