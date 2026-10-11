@@ -222,10 +222,10 @@ def calculate_dq_inductance_map_parallel():
 
     return df_lambda_d_pivot, df_lambda_q_pivot, df_lambda_0_pivot, df_torque_pivot
 
-file_d = "FEMM_Lambda_d_matrix.csv"
-file_q = "FEMM_Lambda_q_matrix.csv"
-file_0 = "FEMM_Lambda_0_matrix.csv"
-file_t = "FEMM_Torque_matrix.csv"
+file_d = "Rotate_FEMM_Lambda_d_matrix.csv"
+file_q = "Rotate_FEMM_Lambda_q_matrix.csv"
+file_0 = "Rotate_FEMM_Lambda_0_matrix.csv"
+file_t = "Rotate_FEMM_Torque_matrix.csv"
 
 target_files = [file_d, file_q, file_0, file_t]
 

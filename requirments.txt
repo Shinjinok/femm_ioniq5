@@ -1,0 +1,5 @@
+numpy
+pyfemm
+pandas
+matplotlib
+gym_electric_motor

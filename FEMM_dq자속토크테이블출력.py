@@ -1,3 +1,4 @@
+from asyncio import subprocess
 import os
 import shutil
 import time
@@ -8,23 +9,77 @@ import pandas as pd
 import femm
 from multiprocessing import Pool, cpu_count
 
+
+def cleanup_all_temp_files():
+    """모든 연산 및 파일 저장이 끝난 후 생성된 임시 파일(.fem, .ans 등) 일괄 삭제"""
+    try:
+        femm.closefemm()
+    except:
+        pass
+        
+    for ext in ['*.fem', '*.ans']:
+        for file_path in glob.glob(f"model_worker_theta_*{ext[1:]}"):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+    print(" 모든 임시 파일(.fem, .ans)이 안전하게 정리되었습니다.")
+
+
+def check_and_release_files(file_list):
+    """저장할 파일들이 열려있는지 확인하고 사용 중이면 예외 발생"""
+    for file_path in file_list:
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'a'):
+                    pass
+            except IOError:
+                raise PermissionError(
+                    f"\n[오류] 대상 파일 '{file_path}'이(가) 다른 프로그램(엑셀 등)에서 열려 있습니다. "
+                    f"해당 파일을 닫은 후 다시 실행해 주세요."
+                )
+# --- 백그라운드 잔여 FEMM 프로세스 강제 정리 ---
+def kill_lingering_femm():
+    """기존에 열려 있거나 좀비로 남은 FEMM 프로세스들을 강제 종료"""
+    for proc_name in ["femm.exe", "wfemm.exe"]:
+        try:
+            subprocess.run(["taskkill", "/f", "/im", proc_name], 
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    print(" 백그라운드 잔여 FEMM 프로세스 정리 완료.")
+    
 def abc_to_dq(i_abc, b):
-    clac = 2/3 * np.array([[1, -1/2, -1/2], 
-                           [0, np.sqrt(3)/2, -np.sqrt(3)/2]])
-    park = np.array([[np.cos(b), np.sin(b)], 
-                     [-np.sin(b), np.cos(b)]])
-    dq = park @ clac @ i_abc
-    return dq
+    # 전체를 감싸는 바깥쪽 대괄호([ ])가 반드시 있어야 합니다.
+    clac_3x3 = 2/3 * np.array([
+        [1, -1/2, -1/2], 
+        [0, np.sqrt(3)/2, -np.sqrt(3)/2],
+        [1/2, 1/2, 1/2]
+    ])
+    
+    park_3x3 = np.array([
+        [np.cos(b), np.sin(b), 0], 
+        [-np.sin(b), np.cos(b), 0],
+        [0, 0, 1]
+    ])
+    
+    dq0 = park_3x3 @ clac_3x3 @ i_abc
+    return dq0
 
 
-def dq_to_abc(v_dq, b):
+def dq_to_abc(dq0, b):
     clac = np.array([[1, -1/2, -1/2], 
-                     [0, np.sqrt(3)/2, -np.sqrt(3)/2]])
+                        [0, np.sqrt(3)/2, -np.sqrt(3)/2],
+                        [1/2, 1/2, 1/2]])
     iclac = np.transpose(clac)
-    ipark = np.array([[np.cos(b), -np.sin(b)], 
-                      [np.sin(b), np.cos(b)]])
-    v = iclac @ ipark @ v_dq
-    return v
+    park_3x3 = np.array([
+                [np.cos(b), np.sin(b), 0], 
+                [-np.sin(b), np.cos(b), 0],
+                [0, 0, 1]
+            ])
+    ipark = np.transpose(park_3x3)
+    abc = iclac @ ipark @ dq0
+    return abc
 
 
 # --- 멀티프로세싱 워커 관련 전역 변수 및 초기화/정리 함수 ---
@@ -68,7 +123,7 @@ def worker_task(task_args):
     
     try:
         # 1. Park/Clark 변환 역과정 (3상 전류 계산)
-        ia, ib, ic = dq_to_abc(np.array([id_val, iq_val]), theta_r)
+        ia, ib, ic = dq_to_abc(np.array([id_val, iq_val, 0.0]), theta_r)
         
         # 2. 회로 전류 설정
         femm.mi_setcurrent('A', ia)
@@ -85,7 +140,7 @@ def worker_task(task_args):
         _, _, lambda_c = femm.mo_getcircuitproperties('C')
         
         # 5. d-q 축 자속 변환
-        lambda_d, lambda_q = abc_to_dq(np.array([lambda_a, lambda_b, lambda_c]), theta_r)
+        lambda_d, lambda_q, lambda_0 = abc_to_dq(np.array([lambda_a, lambda_b, lambda_c]), theta_r)
         
         # 6. 토크 추출
         femm.mo_clearblock()
@@ -93,7 +148,7 @@ def worker_task(task_args):
         torque_val = femm.mo_blockintegral(22)  # 22: Torque via Weighted Stress Tensor
         
         print(f"[PID {os.getpid()}] Beta: {beta_val}°, Id: {id_val:.2f}, Iq: {iq_val:.2f} 완료 (Torque: {torque_val:.4f})")
-        return (beta_val, id_val, iq_val, lambda_d, lambda_q, torque_val)
+        return (beta_val, id_val, iq_val, lambda_d, lambda_q, lambda_0, torque_val)
         
     except Exception as e:
         print(f"[PID {os.getpid()}] 오류 발생 (Beta: {beta_val}°, Id: {id_val:.2f}, Iq: {iq_val:.2f}): {e}")
@@ -157,11 +212,12 @@ def calculate_dq_inductance_map_parallel():
     
     # 4. 결과를 데이터프레임으로 변환 (8배수 및 스케일링 적용)
     data_rows = []
-    for beta_val, id_val, iq_val, lambda_d, lambda_q, torque_val in flat_results:
+    for beta_val, id_val, iq_val, lambda_d, lambda_q, lambda_0, torque_val in flat_results:
         idq_val = round(np.sqrt(id_val**2 + iq_val**2), 2)
         
         scaled_lambda_d = round(lambda_d * 8000.0, 2)
         scaled_lambda_q = round(lambda_q * 8000.0, 2)
+        scaled_lambda_0 = round(lambda_0 * 8000.0, 2)
         scaled_torque = round(torque_val * 8.0, 2)
         
         data_rows.append({
@@ -169,6 +225,7 @@ def calculate_dq_inductance_map_parallel():
             'I_dq': idq_val,
             'Lambda_d': scaled_lambda_d,
             'Lambda_q': scaled_lambda_q,
+            'Lambda_0': scaled_lambda_0,
             'Torque': scaled_torque
         })
         
@@ -177,15 +234,18 @@ def calculate_dq_inductance_map_parallel():
     # 5. 행: Beta(위상각), 열: I_dq(전류크기) 형태로 피벗 테이블 변환
     df_lambda_d_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_d')
     df_lambda_q_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_q')
+    df_lambda_0_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_0')   
     df_torque_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Torque')
     
     # 6. 각각 별도의 CSV 파일로 저장
     file_d = "FEMM_Lambda_d_matrix.csv"
     file_q = "FEMM_Lambda_q_matrix.csv"
+    file_0 = "FEMM_Lambda_0_matrix.csv"
     file_t = "FEMM_Torque_matrix.cdv" if False else "FEMM_Torque_matrix.csv"
     
     df_lambda_d_pivot.to_csv(file_d, encoding="utf-8-sig")
     df_lambda_q_pivot.to_csv(file_q, encoding="utf-8-sig")
+    df_lambda_0_pivot.to_csv(file_0, encoding="utf-8-sig")
     df_torque_pivot.to_csv(file_t, encoding="utf-8-sig")
     
     print(f" '{file_d}', '{file_q}', '{file_t}' 저장 완료! (행: 위상각°, 열: 전류크기A)")
@@ -194,7 +254,10 @@ def calculate_dq_inductance_map_parallel():
 
 
 if __name__ == '__main__':
+    kill_lingering_femm()  # 기존에 열려 있거나 좀비로 남은 FEMM 프로세스들을 강제 종료
+
     import multiprocessing
     multiprocessing.freeze_support()
     
     df_d, df_q, df_t = calculate_dq_inductance_map_parallel()
+    cleanup_worker()  # 모든 연산 및 파일 저장이 끝난 후 생성된 임시 파일(.fem, .ans 등) 일괄 삭제
