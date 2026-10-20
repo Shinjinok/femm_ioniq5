@@ -4,7 +4,8 @@ from scipy.interpolate import RegularGridInterpolator
 import matplotlib.pyplot as plt
 
 class IPMSMSimulator:
-    def __init__(self, csv_d_path, csv_q_path, pole_pairs=4, rs=0.05, J=0.01, B=0.0001):        """
+    def __init__(self, csv_d_path, csv_q_path, pole_pairs=4, rs=0.05, J=0.01, B=0.0001):        
+        """
         IPMSM 시뮬레이터 초기화
         - csv_d_path: d축 자속쇄교수 CSV 파일 경로
         - csv_q_path: q축 자속쇄교수 CSV 파일 경로

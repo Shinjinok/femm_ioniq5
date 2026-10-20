@@ -156,7 +156,7 @@ class IPMSMSimulator:
         omega_e = self.p * wm
         
         # 2. 증분 인덕턴스 행렬 계산
-        L_inc = self.compute_incremental_inductance2(Idq0)
+        L_inc = self.compute_incremental_inductance(Idq0)
         
         # 3. 속도 기전력 항 수정 (전류 대신 자속 이용 예시)
         # 회전 좌표계 속도 기전력 전압 벡터: [-omega_e * lamda[1], omega_e * lamda[0], 0]
@@ -195,7 +195,7 @@ class IPMSMSimulator:
 
 # --- 강제 속도 인가 및 BEMF 측정 구동 예제 ---
 if __name__ == "__main__":
-    sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', 'FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.0618)
+    sim = IPMSMSimulator('Rotate_FEMM_Lambda_d_matrix.csv', 'Rotate_FEMM_Lambda_q_matrix.csv', 'Rotate_FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.0618)
     
     dt = 0.0001  # 100 us 샘플링 타임
     total_time = 0.1  # 0.5초 시뮬레이션

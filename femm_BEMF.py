@@ -22,7 +22,7 @@ CIRCUIT_NAMES = ["A", "B", "C"]  # FEMM 내 상 회로 이름
 POLE_PAIRS = 4  # 극쌍수 (Ioniq 5 등 주파수 계산용)
 
 # 전기각 0도 ~ 360도를 만족하기 위한 기계각 설정 (0 ~ 360 / POLE_PAIRS)
-MAX_MECH_ANGLE = 180.0 / POLE_PAIRS
+MAX_MECH_ANGLE = 360.0 / POLE_PAIRS
 DEG_STEP = 5/4  # 미분 및 FFT 정확도를 위한 0.5도 간격 권장
 ANGLES = [round(a, 2) for a in np.arange(-MAX_MECH_ANGLE, MAX_MECH_ANGLE + 1e-5, DEG_STEP)]
 temp_file_delete = True  # 시뮬레이션 후 임시 파일 삭제 여부 (True: 삭제, False: 유지)

@@ -139,7 +139,7 @@ class IPMSMSimulator:
 
 # --- 시뮬레이터 구동 및 테스트 예제 ---
 if __name__ == "__main__":
-    sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', 'FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.05)
+    sim = IPMSMSimulator('Rotate_FEMM_Lambda_d_matrix.csv', 'Rotate_FEMM_Lambda_q_matrix.csv', 'Rotate_FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.05)
     
     dt = 0.001 # 100 us
     total_time = 10.0 # 1 s
