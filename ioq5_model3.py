@@ -213,9 +213,9 @@ class IPMSMSimulator:
 
 # --- 강제 속도 인가 및 BEMF 측정 구동 예제 ---
 if __name__ == "__main__":
-    #csv_d_path = '/content/drive/MyDrive/IPMSM/FEMM_Lambda_d_matrix.csv'
-    #csv_q_path = '/content/drive/MyDrive/IPMSM/FEMM_Lambda_q_matrix.csv'
-    #csv_0_path = '/content/drive/MyDrive/IPMSM/FEMM_Lambda_0_matrix.csv'
+    #csv_d_path = 'FEMM_Lambda_d_matrix.csv'
+    #csv_q_path = 'FEMM_Lambda_q_matrix.csv'
+    #csv_0_path = 'FEMM_Lambda_0_matrix.csv'
     csv_d_path = 'Rotate_FEMM_Lambda_d_matrix.csv'
     csv_q_path = 'Rotate_FEMM_Lambda_q_matrix.csv'
     csv_0_path = 'Rotate_FEMM_Lambda_0_matrix.csv'
@@ -276,7 +276,7 @@ if __name__ == "__main__":
     plt.figure(figsize=(10, 8))
 
     # 1. 3상 역기전력 그래프
-    plt.subplot(3, 1, 1)
+    plt.subplot(2, 1, 1)
     plt.plot(history_time, history_ea, 'r-', label='ea', alpha=0.9)
     plt.plot(history_time, history_eb, 'g-', label='eb', alpha=0.9)
     plt.plot(history_time, history_ec, 'b-', label='ec', alpha=0.9)
@@ -285,7 +285,7 @@ if __name__ == "__main__":
     plt.legend(loc='upper right')
     plt.grid(True, linestyle='--', alpha=0.7)
 
-    # 2. dq축 역기전력 그래프
+    """ # 2. dq축 역기전력 그래프
     plt.subplot(3, 1, 2)
     plt.plot(history_time, history_Te, 'm-', label='Te', lw=1.5)
     #plt.plot(history_time, history_eq, 'c-', label='eq (omega_e * ld)', lw=1.5)
@@ -293,13 +293,13 @@ if __name__ == "__main__":
     plt.xlabel('Time [ms]')
     plt.ylabel('Torque [Nm]')
     plt.legend(loc='upper right')
-    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.grid(True, linestyle='--', alpha=0.7) """
 
     # 3. dq축 전류 그래프
-    plt.subplot(3, 1, 3)
-    plt.plot(history_time, history_ed, 'm-', label='speed_emf[0]', lw=1.5)
-    plt.plot(history_time, history_eq, 'c-', label='speed_emf[1]', lw=1.5)
-    plt.plot(history_time, history_e0, 'y-', label='speed_emf[2]', lw=1.5)
+    plt.subplot(2, 1, 2)
+    plt.plot(history_time, history_ed, 'm-', label='emf_d', lw=1.5)
+    plt.plot(history_time, history_eq, 'c-', label='emf_q', lw=1.5)
+    plt.plot(history_time, history_e0, 'y-', label='emf_0', lw=1.5)
     plt.title('speed_emf Components (omega_e * lambda)')
     plt.xlabel('Time [ms]')
     plt.ylabel('Back-EMF [V]')
@@ -308,3 +308,63 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.show()
+
+    # 격자 데이터 생성 (전류 크기와 전류각 그리드 추출)
+current_grid, beta_grid = np.meshgrid(sim.currents, sim.betas)
+
+# 대표 자속(Flux)은 중간값으로 고정하여 3차원 곡면 데이터 계산
+fixed_flux = sim.fluxes[len(sim.fluxes) // 2]
+
+lambda_d_surf = np.zeros_like(current_grid)
+lambda_q_surf = np.zeros_like(current_grid)
+lambda_0_surf = np.zeros_like(current_grid)
+
+for i in range(current_grid.shape[0]):
+    for j in range(current_grid.shape[1]):
+        # Current와 Beta 성분 기반으로 역산한 Idq0 가상 전동기 벡터 입력
+        I_val = current_grid[i, j]
+        beta_rad = np.radians(beta_grid[i, j])
+
+        # 임의의 dq0 가상 전류점 매핑
+        id_temp = I_val * np.cos(beta_rad)
+        iq_temp = I_val * np.sin(beta_rad)
+        i0_temp = 0.0
+
+        # 보간기를 통한 자속 검출
+        flux_vector = sim.get_flux([id_temp, iq_temp, i0_temp])
+        lambda_d_surf[i, j] = flux_vector[0]
+        lambda_q_surf[i, j] = flux_vector[1]
+        lambda_0_surf[i, j] = flux_vector[2]
+
+# 3차원 그래프 시각화
+fig = plt.figure(figsize=(20, 6))
+
+# 1. d축 자속쇄교수 곡면
+ax1 = fig.add_subplot(1, 3, 1, projection='3d')
+surf1 = ax1.plot_surface(current_grid, beta_grid, lambda_d_surf, cmap='viridis', edgecolor='none', alpha=0.9)
+ax1.set_title('d-axis Flux Linkage ($\\lambda_d$) [Wb]', fontsize=12)
+ax1.set_xlabel('Current [A]')
+ax1.set_ylabel('Beta [deg]')
+ax1.set_zlabel('Flux [Wb]')
+fig.colorbar(surf1, ax=ax1, shrink=0.5, aspect=10)
+
+# 2. q축 자속쇄교수 곡면
+ax2 = fig.add_subplot(1, 3, 2, projection='3d')
+surf2 = ax2.plot_surface(current_grid, beta_grid, lambda_q_surf, cmap='plasma', edgecolor='none', alpha=0.9)
+ax2.set_title('q-axis Flux Linkage ($\\lambda_q$) [Wb]', fontsize=12)
+ax2.set_xlabel('Current [A]')
+ax2.set_ylabel('Beta [deg]')
+ax2.set_zlabel('Flux [Wb]')
+fig.colorbar(surf2, ax=ax2, shrink=0.5, aspect=10)
+
+# 3. 0축 자속쇄교수 곡면
+ax3 = fig.add_subplot(1, 3, 3, projection='3d')
+surf3 = ax3.plot_surface(current_grid, beta_grid, lambda_0_surf, cmap='inferno', edgecolor='none', alpha=0.9)
+ax3.set_title('0-axis Flux Linkage ($\\lambda_0$) [Wb]', fontsize=12)
+ax3.set_xlabel('Current [A]')
+ax3.set_ylabel('Beta [deg]')
+ax3.set_zlabel('Flux [Wb]')
+fig.colorbar(surf3, ax=ax3, shrink=0.5, aspect=10)
+
+plt.tight_layout()
+plt.show()
