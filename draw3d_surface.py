@@ -9,11 +9,31 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # d, q, 0, Torque 파일과 그래프 제목, 컬러맵 정보를 담은 딕셔너리
 target_plots = {
-    'Lambda_d': ('Rotate_FEMM_Lambda_d_matrix3.csv', 'd-axis Flux Linkage (Lambda_d)', 'viridis'),
-    'Lambda_q': ('Rotate_FEMM_Lambda_q_matrix3.csv', 'q-axis Flux Linkage (Lambda_q)', 'plasma'),
-    'Lambda_0': ('Rotate_FEMM_Lambda_0_matrix3.csv', 'Zero-sequence Flux (Lambda_0)', 'cividis'),
-    'Torque': ('Rotate_FEMM_Torque_matrix2.csv', 'Torque', 'inferno')
+    'Lambda_d': ('Rotate_FEMM_Lambda_d_matrix.csv', 'd-axis Flux Linkage (Lambda_d)', 'viridis'),
+    'Lambda_q': ('Rotate_FEMM_Lambda_q_matrix.csv', 'q-axis Flux Linkage (Lambda_q)', 'plasma'),
+    'Lambda_0': ('Rotate_FEMM_Lambda_0_matrix.csv', 'Zero-sequence Flux (Lambda_0)', 'cividis'),
+    'Torque': ('Rotate_FEMM_Torque_matrix.csv', 'Torque', 'inferno')
 }
+
+def clean_value(val):
+    """문자열 형태의 튜플/넘파이 객체(예: '(np.float64(...), 2)')를 실수로 변환하는 함수"""
+    if isinstance(val, (int, float, np.number)):
+        return float(val)
+    if isinstance(val, str):
+        val = val.strip()
+        try:
+            return float(val)
+        except ValueError:
+            try:
+                # 문자열 내의 튜플 및 np.float64 표현식을 안전하게 평가
+                evaluated = eval(val, {"np": np})
+                if isinstance(evaluated, (tuple, list)):
+                    return float(evaluated[0])
+                else:
+                    return float(evaluated)
+            except Exception:
+                return np.nan
+    return np.nan
 
 # 각 파일별로 반복문을 돌며 3차원 그래프 생성
 for key, (file_name, title_desc, cmap_name) in target_plots.items():
@@ -24,9 +44,12 @@ for key, (file_name, title_desc, cmap_name) in target_plots.items():
     df.index = df.index.astype(float)
     df.columns = df.columns.astype(float)
 
+    # 데이터프레임 내부의 문자열(튜플 형태 등)을 숫자로 정제
+    df_cleaned = df.map(clean_value) if hasattr(df, 'map') else df.applymap(clean_value)
+
     # 2. 3차원 좌표계용 X, Y 그리드 생성
-    X, Y = np.meshgrid(df.columns, df.index)
-    Z = df.values
+    X, Y = np.meshgrid(df_cleaned.columns, df_cleaned.index)
+    Z = df_cleaned.values
 
     # 3. 3차원 서피스 그래프 플롯팅
     fig = plt.figure(figsize=(12, 8))

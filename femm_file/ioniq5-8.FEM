@@ -1,6 +1,6 @@
 [Format]      =  4.0
 [Frequency]   =  0
-[Precision]   =  1e-008
+[Precision]   =  1e-08
 [MinAngle]    =  30
 [DoSmartMesh] =  1
 [Depth]       =  153

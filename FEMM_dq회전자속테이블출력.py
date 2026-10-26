@@ -8,7 +8,21 @@ import numpy as np
 import pandas as pd
 import femm
 from multiprocessing import Pool, cpu_count
+import psutil
+def terminate_femm_processes():
+    killed_count = 0
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            name = proc.info['name'] or ""
+            # 프로세스 이름에 'femm'이 포함된 경우
+            if 'femm' in name.lower():
+                proc.kill()
+                print(f"종료됨: PID {proc.info['pid']} ({name})")
+                killed_count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
 
+    print(f"\n총 {killed_count}개의 FEMM 프로세스를 종료했습니다.")
 def abc_to_dq(i_abc, b):
     # 전체를 감싸는 바깥쪽 대괄호([ ])가 반드시 있어야 합니다.
     clac_3x3 = 2/3 * np.array([
@@ -231,9 +245,11 @@ target_files = [file_d, file_q, file_0, file_t]
 
 if __name__ == '__main__':
     # 파일이 열려있는지 먼저 체크
+    #terminate_femm_processes()
     check_and_release_files(target_files)
     cleanup_all_temp_files()
     kill_lingering_femm()
+    
     import multiprocessing
     multiprocessing.freeze_support()
     
