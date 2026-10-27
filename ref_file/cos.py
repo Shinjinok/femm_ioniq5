@@ -5,12 +5,15 @@ import numpy as np
 x = np.arange(0, 2 * np.pi, 0.1)
 
 # 2. 코사인 값 계산
-y = -np.cos(2*x-2*np.pi/3)  # y = -cos(2x + 2π/3)
+a = np.cos(x)  # y = -cos(2x + 2π/3)
+b = np.cos(x-np.pi*2/3)
+c = np.cos(x+np.pi*2/3)
 
 # 3. 그래프 크기 및 설정
 plt.figure(figsize=(6, 3), dpi=100)
-plt.plot(x, y, label='y = cos(x)', color='tab:blue', linewidth=2)
-
+plt.plot(x, a, label='a = cos(x)', color='tab:red', linewidth=2)
+plt.plot(x, b, label='b = cos(x-2/3pi)', color='tab:blue', linewidth=2)
+plt.plot(x, c, label='c = cos(x+2/3pi)', color='tab:green', linewidth=2)
 # 4. 그래프 디자인 및 라벨 추가
 plt.title('Cosine Wave', fontsize=14, fontweight='bold', pad=15)
 plt.xlabel('X (radians)', fontsize=12)

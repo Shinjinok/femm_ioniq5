@@ -11,7 +11,7 @@ from femm import FemmSession
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['axes.unicode_minus'] = False
 
-poles = 8   # 극수
+poles = 8    # 극수
 pole_pairs = poles / 2  # 극쌍수 (4)
 
 def kill_lingering_femm():
@@ -53,9 +53,12 @@ class SpeedControllerPI:
         return np.clip(output, self.min_out, self.max_out)
 
 def run_realtime_femm_foc_simulation():
+    # ⏱️ 총 소요 시간 측정 시작
+    start_time_global = time.time()
+    
     kill_lingering_femm()
 
-    base_fem_path = "ioniq5-13.FEM"
+    base_fem_path = "ioniq5-14.FEM"
     if not os.path.exists(base_fem_path):
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
@@ -64,21 +67,18 @@ def run_realtime_femm_foc_simulation():
     print(f"==================================================")
     
     target_speed_rpm = 36   # 목표 속도 [RPM]
-    target_radpsec = target_speed_rpm /60 * 2* np.pi
-
     current_speed_rpm = 0.0    # 초기 속도 [RPM]
-    current_radpsec = current_speed_rpm /60 * 2 * np.pi
-    
+        
     theta_mech_cum = 0.0       # 누적 기계각 [°] (계속 증가)
     delta_deg = 0.0            # 이번 스텝에서 회전할 증분 각도 [°]
     
-    speed_pi = SpeedControllerPI(kp=2, ki=5.0, output_limits=(-340, 340))
+    speed_pi = SpeedControllerPI(kp=1, ki=10, output_limits=(-340, 340))
     
     dt = 0.001    # 제어 주기 (1ms)
-    J = 0.01      # 로터 관성 모멘트 [kg·m^2]
+    J = 0.02      # 로터 관성 모멘트 [kg·m^2]
     load_torque = 0.0  # 부하 토크 [Nm]
     
-    total_steps = 36  # 실시간 연동 시뮬레이션 스텝 수
+    total_steps = 100  # 실시간 연동 시뮬레이션 스텝 수
     
     # 데이터 기록용 리스트
     time_history = []
@@ -93,44 +93,42 @@ def run_realtime_femm_foc_simulation():
     working_fem_path = "model_working.fem"
     shutil.copy(base_fem_path, working_fem_path)
     
-    session = FemmSession(port=48010, headless=False)
-    
+    session = FemmSession(port=48010, headless=True)
+    theta_elec_deg = 0
     try:
         session.opendocument(working_fem_path)
-        
+        cos_150 = np.cos(30*np.pi/360)
+        sin_150 = -np.sin(30*np.pi/360)
         for step in range(total_steps):
-            loop_start_time = time.time()
             current_time = step * dt
             
             # 1. 속도 PI 제어기 계산 (q축 기준 전류 iq_ref 산출)
-            iq_ref = speed_pi.compute(target_radpsec, current_radpsec, dt)
-            id_ref = 0.0
+            i_ref = speed_pi.compute(target_speed_rpm, current_speed_rpm, dt)
+            iq_ref = cos_150*i_ref
+            id_ref = sin_150*i_ref
             
             # 2. 전기각 계산 및 역 Park-Clarke 변환으로 삼상 전류 계산
-            # 전기각(Electrical Angle) = 기계각 * 극쌍수(pole_pairs)
-            theta_elec_deg = (theta_mech_cum * pole_pairs) % 360.0
-            theta_rad = np.radians(theta_elec_deg) % np.pi
-            i_a, i_b, i_c = dq_to_abc([id_ref, iq_ref, 0], theta_rad)
+            theta_elec_deg = (theta_mech_cum * pole_pairs) 
+            theta_rad = np.radians(theta_elec_deg)
             
+            i_a, i_b, i_c = dq_to_abc([id_ref, iq_ref, 0], theta_rad)
+
             # 3. 삼상 전류 고정 설정
             session.mi_setcurrent('A', float(i_a))
             session.mi_setcurrent('B', float(i_b))
             session.mi_setcurrent('C', float(i_c))
             
-            # 4. 증분 회전 적용 (반드시 누적 각도가 아닌 증분 각도인 delta_deg 전달)
-            
-            if abs(delta_deg) > 1e-5:
-                session.mi_clearselected()
+            # 4. 증분 회전 적용
+            """ if abs(delta_deg) > 1e-5:
                 session.mi_selectgroup(1)
                 session.mi_selectgroup(20)
-                session.mi_moverotate(0, 0, delta_deg)
-
+                session.mi_moverotate(0, 0, delta_deg) """
+            session.mi_modifyboundprop('slidingAirGap',10,theta_mech_cum)
             # 5. FEMM 해석 실행 및 솔루션 로드
             session.mi_analyze(1)
             session.mi_loadsolution()
             
             # 6. 토크 추출 (그룹 1 블록 적분)
-            session.mo_clearblock()
             session.mo_groupselectblock(1)
             raw_torque = session.mo_blockintegral(22)
             developed_torque = raw_torque * 8.0  # 스케일링 적용
@@ -139,9 +137,9 @@ def run_realtime_femm_foc_simulation():
             accel_rad_s2 = (developed_torque - load_torque) / J
             current_radpsec = accel_rad_s2 * dt
             
-            # [핵심 수정] RPM을 각도(Degree)로 변환: RPM * (360 / 60) * dt = RPM * dt * 6.0
             current_rad = current_radpsec * dt
-            delta_deg = current_rad / (2*np.pi) *360
+            current_speed_rpm = current_radpsec * 30 /np.pi
+            delta_deg = current_rad * 180 / np.pi
             theta_mech_cum += delta_deg
             
             # 데이터 기록
@@ -152,16 +150,18 @@ def run_realtime_femm_foc_simulation():
             i_a_history.append(i_a)
             i_b_history.append(i_b)
             i_c_history.append(i_c)
-            torque_history.append(developed_torque)
+            torque_history.append(developed_torque)  # 🛠️ 토크 데이터 올바르게 저장
             
-            print(f"[Step {step+1:02d}] 속도: {current_speed_rpm:7.2f} RPM | iq_ref: {iq_ref:6.2f} A | 전류(Va): {i_a:6.2f} A | 토크: {developed_torque:6.2f} Nm")
-                 
+            # ⚡ 출력 속도 최적화: 매 스텝 대신 10스텝마다 한 번씩 콘솔 출력
+            if (step + 1) % 10 == 0 or step == 0:
+                print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | iq_ref: {iq_ref:6.2f} A | 전류(Va): {i_a:6.2f} A | 토크: {developed_torque:6.2f} Nm")
+                
     except Exception as e:
         print(f"[실시간 제어 루프 오류 발생]: {e}")
         import traceback
         traceback.print_exc()
         
-    finally:
+    """ finally:
         try:
             session.close()
         except:
@@ -175,7 +175,7 @@ def run_realtime_femm_foc_simulation():
                 except:
                     pass
         kill_lingering_femm()
-        print("실시간 제어 시뮬레이션 종료 및 임시 파일 정리 완료.")
+        print("실시간 제어 시뮬레이션 종료 및 임시 파일 정리 완료.") """
 
     # --- CSV 파일로 결과 저장 ---
     csv_filename = "foc_simulation_results.csv"
@@ -196,6 +196,17 @@ def run_realtime_femm_foc_simulation():
         print(f"CSV 저장 완료: {os.path.abspath(csv_filename)}")
     except Exception as e:
         print(f"CSV 파일 저장 중 오류 발생: {e}")
+
+    # ⏱️ 총 소요 시간 계산 및 출력
+    elapsed_time = time.time() - start_time_global
+    minutes = int(elapsed_time // 60)
+    seconds = elapsed_time % 60
+    print(f"\n==================================================")
+    if minutes > 0:
+        print(f" ⏱️ 총 소요 시간: {minutes}분 {seconds:.2f}초 ({elapsed_time:.2f}초)")
+    else:
+        print(f" ⏱️ 총 소요 시간: {seconds:.2f}초")
+    print(f"==================================================")
 
     # --- 시뮬레이션 결과 그래프 표시 ---
     print("\n[그래프 생성 중...]")
@@ -226,7 +237,7 @@ def run_realtime_femm_foc_simulation():
     plt.legend(loc='best')
     plt.grid(True)
     
-    # 4. 축력(전자기 토크) 그래프
+    # 4. 전자기 토크 그래프
     plt.subplot(4, 1, 4)
     plt.plot(time_history, torque_history, label='Developed Torque (Shaft)', color='purple', linewidth=2)
     plt.axhline(y=load_torque, color='orange', linestyle='--', label=f'Load Torque ({load_torque} Nm)')
