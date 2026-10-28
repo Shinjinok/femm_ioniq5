@@ -6,7 +6,7 @@ import datetime
 import atexit
 import numpy as np
 import pandas as pd
-import femm
+import ref_file2.femm as femm
 from multiprocessing import Pool, cpu_count
 
 

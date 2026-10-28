@@ -3,7 +3,7 @@ import os
 import shutil
 import time
 from multiprocessing import Pool, cpu_count
-import femm
+import ref_file2.femm as femm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # 3D 그래프용 모듈
 import numpy as np

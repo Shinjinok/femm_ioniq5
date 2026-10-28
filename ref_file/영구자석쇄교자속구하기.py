@@ -3,7 +3,7 @@ import os
 import shutil
 import time
 from multiprocessing import Pool, cpu_count
-import femm
+import ref_file2.femm as femm
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

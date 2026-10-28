@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 import matplotlib.pyplot as plt
 
-from ioq5_model_2d import IPMSMSimulator
+from ref_file2.ioq5_model import IPMSMSimulator
 
 
 # --- 강제 속도 인가 및 BEMF 측정 구동 예제 ---
@@ -11,7 +11,7 @@ if __name__ == "__main__":
     sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', 'FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.0618)
     
     dt = 0.0001  # 100 us 샘플링 타임
-    total_time = 0.1  # 0.3초 시뮬레이션
+    total_time = 0.1  # 0.5초 시뮬레이션
     time_steps = np.arange(0, total_time, dt)
     
     # 강제로 인가할 목표 속도 설정 [RPM] (예: 3,000 RPM)
@@ -28,12 +28,14 @@ if __name__ == "__main__":
     history_ec = []
     history_ed = []
     history_eq = []
-    history_theta_m = []
+    history_e0 = []
+    history_beta = []
 
     #a, b = sim.get_flux(0.0, 0.0)
     
     print(f"강제 속도 {target_rpm} RPM 인가에 따른 역기전력(BEMF)을 계산 중입니다...")
-    va, vb, vc = 0.0, 0.0, 0.0
+    Vabc =  np.zeros(3)
+    Iabc = np.zeros(3)
     for t in time_steps:
         # 1. 속도 제어 없이 강제 회전각(theta_m) 및 전기각(theta_e) 적분 업데이트
         theta_m_curr += wm_forced * dt
@@ -41,18 +43,22 @@ if __name__ == "__main__":
         theta_e = sim.p * theta_m_curr
         omega_e = sim.p * wm_forced
         
-        # 2. 무부하 상태(전압 인가 없음: va=0, vb=0, vc=0) 가정 하에 시뮬레이터 스텝 실행
+        # 2. 무부하 상태(전압 인가 없음: Vabc=0) 가정 하에 시뮬레이터 스텝 실행
         # (순수 회전에 의한 역기전력 성분 추출)
-        ia, ib, ic, Te, wm_curr, theta_m_curr, id_curr, iq_curr, vd, vq, beta_deg = sim.simulate_step(
-            va, vb, vc, id_curr, iq_curr, wm_forced, theta_m_curr, dt, load_torque=0.0)
+        Iabc, Te, wm_curr, theta_m_curr, Vdq0, Idq0 = sim.simulate_step(
+            Vabc, Iabc, wm_forced, theta_m_curr, dt, load_torque=0.0)
         # 데이터 기록
         history_time.append(t * 1000)
-        history_ea.append(ia*sim.Rs)  # ia * Rs = ea (역기전력)
-        history_eb.append(ib*sim.Rs)
-        history_ec.append(ic*sim.Rs)
-        history_ed.append(id_curr)
-        history_eq.append(iq_curr)
-        history_theta_m.append(beta_deg)  # rad -> deg 변환
+        history_ea.append(Iabc[0]*sim.Rs)  # ia * Rs = ea (역기전력)
+        history_eb.append(Iabc[1]*sim.Rs)
+        history_ec.append(Iabc[2]*sim.Rs)
+        history_ed.append(Idq0[0])
+        history_eq.append(Idq0[1])
+        history_e0.append(Idq0[2])
+        current_mag = np.linalg.norm(Idq0)
+        
+        beta_deg = np.degrees(np.arctan2(Idq0[1], Idq0[0]))
+        history_beta.append(beta_deg)  # rad -> deg 변환
     # --- 결과 시각화 (3상 및 dq축 역기전력) ---
     plt.figure(figsize=(10, 8))
     
@@ -68,9 +74,9 @@ if __name__ == "__main__":
     
     # 2. dq축 역기전력 그래프
     plt.subplot(3, 1, 2)
-    plt.plot(history_time, history_theta_m, 'm-', label='theta_m(deg)', lw=1.5)
+    plt.plot(history_time, history_beta, 'm-', label='beta (deg)', lw=1.5)
     #plt.plot(history_time, history_eq, 'c-', label='eq (omega_e * ld)', lw=1.5)
-    plt.title('d-q Axis Back-EMF Components (theta_m )')
+    plt.title('d-q Axis Back-EMF Components (beta )')
     plt.xlabel('Time [ms]')
     plt.ylabel('deg')
     plt.legend(loc='upper right')
@@ -78,9 +84,10 @@ if __name__ == "__main__":
 
     # 3. dq축 전류 그래프
     plt.subplot(3, 1, 3)
-    plt.plot(history_time, history_ed, 'm-', label='ed', lw=1.5)
-    plt.plot(history_time, history_eq, 'c-', label='eq', lw=1.5)
-    plt.title('d-q Axis Currents (ed, eq)')
+    plt.plot(history_time, history_ed, 'm-', label='id', lw=1.5)
+    plt.plot(history_time, history_eq, 'c-', label='iq', lw=1.5)
+    plt.plot(history_time, history_e0, 'y-', label='i0', lw=1.5)
+    plt.title('d-q Axis Currents (id, iq, i0)')
     plt.xlabel('Time [ms]')
     plt.ylabel('Current [A]')
     plt.legend(loc='upper right')

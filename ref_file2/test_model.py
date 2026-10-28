@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 import matplotlib.pyplot as plt
 
-from ioq5_model import IPMSMSimulator
+from ref_file2.ioq5_model import IPMSMSimulator
 
 sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', 'FEMM_Lambda_0_matrix.csv', pole_pairs=4, rs=0.0618)
 ia = np.sin(0)

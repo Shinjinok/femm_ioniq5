@@ -4,7 +4,7 @@ import time
 import datetime
 import numpy as np
 import pandas as pd
-import femm
+import ref_file2.femm as femm
 import pythoncom  # Windows COM 초기화용 모듈
 import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count

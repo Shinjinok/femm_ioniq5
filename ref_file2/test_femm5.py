@@ -5,7 +5,7 @@ import subprocess
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
-from femm import FemmSession
+from ref_file2.femm import FemmSession
 
 def dq_to_abc(dq0, b):
     clac2 = np.array([[1, -1/2, -1/2],

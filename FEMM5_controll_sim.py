@@ -72,13 +72,13 @@ def run_realtime_femm_foc_simulation():
     theta_mech_cum = 0.0       # 누적 기계각 [°] (계속 증가)
     delta_deg = 0.0            # 이번 스텝에서 회전할 증분 각도 [°]
     
-    speed_pi = SpeedControllerPI(kp=1, ki=100, output_limits=(-340, 340))
+    speed_pi = SpeedControllerPI(kp=1, ki=10, output_limits=(-340, 340))
     
-    dt = 0.001    # 제어 주기 (1ms)
+    dt = 0.0001    # 제어 주기 (1ms)
     J = 0.02      # 로터 관성 모멘트 [kg·m^2]
     load_torque = 0.0  # 부하 토크 [Nm]
-    
-    total_steps = 100  # 실시간 연동 시뮬레이션 스텝 수
+    current_radpsec = 0.0
+    total_steps = 1000  # 실시간 연동 시뮬레이션 스텝 수
     
     # 데이터 기록용 리스트
     time_history = []
@@ -89,11 +89,12 @@ def run_realtime_femm_foc_simulation():
     i_a_history = []
     i_b_history = []
     i_c_history = []
+    theta_m_histroy = []
     
     working_fem_path = "model_working.fem"
     shutil.copy(base_fem_path, working_fem_path)
     
-    session = FemmSession(port=48010, headless=False)
+    session = FemmSession(port=48010, headless=True)
     theta_elec_deg = 0
     try:
         session.opendocument(working_fem_path)
@@ -135,10 +136,10 @@ def run_realtime_femm_foc_simulation():
             
             # 7. 모터 동역학 방정식 계산 및 다음 스텝 회전 각도(delta_deg) 산출
             accel_rad_s2 = (developed_torque - load_torque) / J
-            current_radpsec = accel_rad_s2 * dt
+            current_radpsec += accel_rad_s2 * dt
             
             current_rad = current_radpsec * dt
-            current_speed_rpm = current_radpsec * 30 /np.pi
+            current_speed_rpm = current_radpsec * 30 /np.pi 
             delta_deg = current_rad * 180 / np.pi
             theta_mech_cum += delta_deg
             
@@ -151,10 +152,11 @@ def run_realtime_femm_foc_simulation():
             i_b_history.append(i_b)
             i_c_history.append(i_c)
             torque_history.append(developed_torque)  # 🛠️ 토크 데이터 올바르게 저장
+            theta_m_histroy.append(theta_mech_cum)
             
             # ⚡ 출력 속도 최적화: 매 스텝 대신 10스텝마다 한 번씩 콘솔 출력
-            if (step + 1) % 10 == 0 or step == 0:
-                print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | iq_ref: {iq_ref:6.2f} A | 전류(Va): {i_a:6.2f} A | 토크: {developed_torque:6.2f} Nm")
+            #if (step + 1) % 10 == 0 or step == 0:
+            print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | iq_ref: {iq_ref:6.2f} A | theta(deg): {delta_deg:3.2f} deg | 토크: {developed_torque:6.2f} Nm")
                 
     except Exception as e:
         print(f"[실시간 제어 루프 오류 발생]: {e}")

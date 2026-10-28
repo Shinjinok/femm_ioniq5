@@ -8,7 +8,7 @@ import numpy as np
 # FEMM 모듈 확인
 femm_available = False
 try:
-    import femm
+    import ref_file2.femm as femm
     femm_available = True
 except ImportError:
     print("경고: FEMM 모듈이 설치되지 않았습니다.")

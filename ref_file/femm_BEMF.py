@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 try:
-    import femm
+    import ref_file2.femm as femm
 except ImportError:
     print("pyfemm이 설치되어 있지 않습니다. (pip install pyfemm)")
     sys.exit(1)

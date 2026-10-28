@@ -6,10 +6,25 @@ import glob
 import subprocess
 import numpy as np
 import pandas as pd
-import femm
+import ref_file2.femm as femm
 from multiprocessing import Pool, cpu_count
+import psutil
+def terminate_femm_processes():
+    killed_count = 0
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            name = proc.info['name'] or ""
+            # 프로세스 이름에 'femm'이 포함된 경우
+            if 'femm' in name.lower():
+                proc.kill()
+                print(f"종료됨: PID {proc.info['pid']} ({name})")
+                killed_count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
 
+    print(f"\n총 {killed_count}개의 FEMM 프로세스를 종료했습니다.")
 def abc_to_dq(i_abc, b):
+    # 전체를 감싸는 바깥쪽 대괄호([ ])가 반드시 있어야 합니다.
     clac_3x3 = 2/3 * np.array([
         [1, -1/2, -1/2], 
         [0, np.sqrt(3)/2, -np.sqrt(3)/2],
@@ -53,6 +68,7 @@ def worker_task(task_args):
     global _base_fem_path
     idq_val, beta_deg = task_args
     
+    # PID 대신 각도와 전류를 포함한 고유 파일명 생성
     worker_fem_path = f"model_worker_theta_{beta_deg}_idq_{idq_val}.fem"
     shutil.copy(_base_fem_path, worker_fem_path)
     
@@ -94,17 +110,6 @@ def worker_task(task_args):
     except Exception as e:
         print(f"[오류 발생] (Theta: {beta_deg}°, I_dq: {idq_val}A): {e}")
         raise e
-        
-    finally:
-        # ★ 중요: 작업이 끝난 후 열린 솔루션과 모델 문서를 닫아 포커스 꼬임 방지
-        try:
-            femm.mo_close()
-        except:
-            pass
-        try:
-            femm.mi_close()
-        except:
-            pass
 
 
 def cleanup_all_temp_files():
@@ -138,6 +143,7 @@ def check_and_release_files(file_list):
 
 
 def calculate_dq_inductance_map_parallel():
+    # 0. 실행 전 기존에 떠있던 잔여 FEMM 프로세스 일괄 청소
     kill_lingering_femm()
 
     base_fem_path = "ioniq5-13.FEM"
@@ -145,8 +151,8 @@ def calculate_dq_inductance_map_parallel():
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
     # 전류 크기 및 회전 각도 범위 설정
-    idq_list = np.arange(0, 341, 2)
-    theta_list = np.arange(0, 181, 2)
+    idq_list = np.arange(0, 341, 34)
+    theta_list = np.arange(-180, 181, 5)
 
     all_tasks = []
     for beta_deg in theta_list:
@@ -154,15 +160,14 @@ def calculate_dq_inductance_map_parallel():
             all_tasks.append((idq_val, beta_deg))
             
     total_tasks = len(all_tasks)
-    
-    # ★ 수정: FEMM 안정성을 위해 프로세스 수를 최대 8개(또는 코어 수 기반)로 조정
-    num_processes = min(64, total_tasks)
+    num_processes = min(60, total_tasks)
     
     print(f"==================================================")
     print(f" 총 연산 조합 수 : {total_tasks}개")
-    print(f" 고정 프로세스 수 : {num_processes}개 (안정성 고려 조절됨)")
+    print(f" 고정 프로세스 수 : {num_processes}개 (동적 작업 분배 방식)")
     print(f"==================================================")
     
+    # --- [시간 측정 시작] ---
     start_time_sec = time.time()
     start_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f" 시뮬레이션 시작 시간: {start_time_str}")
@@ -176,6 +181,7 @@ def calculate_dq_inductance_map_parallel():
     finally:
         pass
             
+    # --- [시간 측정 종료] ---
     end_time_sec = time.time()
     end_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     elapsed_sec = end_time_sec - start_time_sec
@@ -188,6 +194,7 @@ def calculate_dq_inductance_map_parallel():
     print(f" 총 소요 시간      : {int(elapsed_min)}분 {remaining_sec:.2f}초 (총 {elapsed_sec:.2f}초)")
     print(f"==================================================")
     
+    # 4. 결과를 데이터프레임으로 변환 (스케일링 적용)
     data_rows = []
     for beta_deg, idq_val, lambda_d, lambda_q, lambda_0, torque_val in flat_results:
         scaled_lambda_d = round(lambda_d * 8000.0, 2)
@@ -206,13 +213,16 @@ def calculate_dq_inductance_map_parallel():
         
     df_results = pd.DataFrame(data_rows)
     
+    # 5. 행: Beta(전류각), 열: I_dq(전류크기) 형태로 피벗 테이블 변환
     df_lambda_d_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_d')
     df_lambda_q_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_q')
     df_lambda_0_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Lambda_0')
     df_torque_pivot = df_results.pivot(index='Beta', columns='I_dq', values='Torque')
     
+    # 파일이 열려있는지 먼저 체크
     check_and_release_files(target_files)
     
+    # 7. 각각 별도의 CSV 파일로 저장
     df_lambda_d_pivot.to_csv(file_d, encoding="utf-8-sig")
     df_lambda_q_pivot.to_csv(file_q, encoding="utf-8-sig")
     df_lambda_0_pivot.to_csv(file_0, encoding="utf-8-sig")
@@ -220,22 +230,26 @@ def calculate_dq_inductance_map_parallel():
     
     print(f" '{file_d}', '{file_q}', '{file_0}', '{file_t}' 저장 완료! (행: 회전각도°, 열: 전류크기A)")
 
+    # 8. 파일 저장까지 모두 완료된 후 임시 파일 일괄 삭제
     cleanup_all_temp_files()
     kill_lingering_femm()
 
     return df_lambda_d_pivot, df_lambda_q_pivot, df_lambda_0_pivot, df_torque_pivot
 
-file_d = "Rotate_FEMM_Lambda_d_matrix2.csv"
-file_q = "Rotate_FEMM_Lambda_q_matrix2.csv"
-file_0 = "Rotate_FEMM_Lambda_0_matrix2.csv"
-file_t = "Rotate_FEMM_Torque_matrix2.csv"
+file_d = "Rotate_FEMM_Lambda_d_matrix.csv"
+file_q = "Rotate_FEMM_Lambda_q_matrix.csv"
+file_0 = "Rotate_FEMM_Lambda_0_matrix.csv"
+file_t = "Rotate_FEMM_Torque_matrix.csv"
 
 target_files = [file_d, file_q, file_0, file_t]
 
 if __name__ == '__main__':
+    # 파일이 열려있는지 먼저 체크
+    #terminate_femm_processes()
     check_and_release_files(target_files)
     cleanup_all_temp_files()
     kill_lingering_femm()
+    
     import multiprocessing
     multiprocessing.freeze_support()
     

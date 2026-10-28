@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 import matplotlib.pyplot as plt
 
-from ioq5_model import IPMSMSimulator
+from ref_file2.ioq5_model import IPMSMSimulator
 
 # --- 전류 PI 제어기 클래스 ---
 class CurrentPIController:

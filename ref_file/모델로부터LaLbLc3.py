@@ -5,7 +5,7 @@ import datetime
 import numpy as np
 import pandas as pd
 import pythoncom
-import femm
+import ref_file2.femm as femm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # 3D 그래프용 모듈
 from multiprocessing import Pool, cpu_count

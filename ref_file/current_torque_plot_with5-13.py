@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # 필수 모듈 확인
 try:
-    import femm
+    import ref_file2.femm as femm
 except ImportError:
     print("오류: 'pyfemm' 모듈이 설치되지 않았습니다.")
     print("설치 명령: pip install pyfemm")
