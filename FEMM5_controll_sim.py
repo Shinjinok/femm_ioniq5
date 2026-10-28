@@ -72,7 +72,7 @@ def run_realtime_femm_foc_simulation():
     theta_mech_cum = 0.0       # 누적 기계각 [°] (계속 증가)
     delta_deg = 0.0            # 이번 스텝에서 회전할 증분 각도 [°]
     
-    speed_pi = SpeedControllerPI(kp=1, ki=10, output_limits=(-340, 340))
+    speed_pi = SpeedControllerPI(kp=1, ki=100, output_limits=(-340, 340))
     
     dt = 0.001    # 제어 주기 (1ms)
     J = 0.02      # 로터 관성 모멘트 [kg·m^2]
@@ -93,19 +93,19 @@ def run_realtime_femm_foc_simulation():
     working_fem_path = "model_working.fem"
     shutil.copy(base_fem_path, working_fem_path)
     
-    session = FemmSession(port=48010, headless=True)
+    session = FemmSession(port=48010, headless=False)
     theta_elec_deg = 0
     try:
         session.opendocument(working_fem_path)
-        cos_150 = np.cos(30*np.pi/360)
-        sin_150 = -np.sin(30*np.pi/360)
+        cos_130 = np.cos(130*np.pi/180)
+        sin_130 = np.sin(130*np.pi/180)
         for step in range(total_steps):
             current_time = step * dt
             
             # 1. 속도 PI 제어기 계산 (q축 기준 전류 iq_ref 산출)
             i_ref = speed_pi.compute(target_speed_rpm, current_speed_rpm, dt)
-            iq_ref = cos_150*i_ref
-            id_ref = sin_150*i_ref
+            iq_ref = sin_130 * i_ref
+            id_ref = cos_130 * i_ref
             
             # 2. 전기각 계산 및 역 Park-Clarke 변환으로 삼상 전류 계산
             theta_elec_deg = (theta_mech_cum * pole_pairs) 

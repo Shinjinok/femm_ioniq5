@@ -45,7 +45,7 @@ class SpeedPIController:
 if __name__ == "__main__":
     sim = IPMSMSimulator('FEMM_Lambda_d_matrix.csv', 'FEMM_Lambda_q_matrix.csv', pole_pairs=4, rs=0.06)
     
-    dt = 0.0001  # 100 us 샘플링 타임
+    dt = 0.0002  # 100 us 샘플링 타임
     total_time = 0.5  # 총 0.5초 시뮬레이션
     time_steps = np.arange(0, total_time, dt)
     
