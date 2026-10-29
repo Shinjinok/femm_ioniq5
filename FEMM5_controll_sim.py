@@ -13,6 +13,9 @@ plt.rcParams['axes.unicode_minus'] = False
 
 poles = 8    # 극수
 pole_pairs = poles / 2  # 극쌍수 (4)
+CIRCUIT_NAMES = ["A","B","C"]
+
+
 
 def kill_lingering_femm():
     """기존에 열려 있거나 좀비로 남은 FEMM 프로세스들을 강제 종료"""
@@ -66,7 +69,7 @@ def run_realtime_femm_foc_simulation():
     print(f" FEMM 단일 세션 유지 및 증분 회전(Delta Degree) FOC 제어 시작")
     print(f"==================================================")
     
-    target_speed_rpm = 36   # 목표 속도 [RPM]
+    target_speed_rpm = 141   # 목표 속도 [RPM]
     current_speed_rpm = 0.0    # 초기 속도 [RPM]
         
     theta_mech_cum = 0.0       # 누적 기계각 [°] (계속 증가)
@@ -74,11 +77,11 @@ def run_realtime_femm_foc_simulation():
     
     speed_pi = SpeedControllerPI(kp=1, ki=10, output_limits=(-340, 340))
     
-    dt = 0.0001    # 제어 주기 (1ms)
-    J = 0.02      # 로터 관성 모멘트 [kg·m^2]
+    dt = 0.001    # 제어 주기 (1ms)
+    J = 0.036      # 로터 관성 모멘트 [kg·m^2]
     load_torque = 0.0  # 부하 토크 [Nm]
     current_radpsec = 0.0
-    total_steps = 1000  # 실시간 연동 시뮬레이션 스텝 수
+    total_steps = 100  # 실시간 연동 시뮬레이션 스텝 수
     
     # 데이터 기록용 리스트
     time_history = []
@@ -89,8 +92,9 @@ def run_realtime_femm_foc_simulation():
     i_a_history = []
     i_b_history = []
     i_c_history = []
+ 
     theta_m_histroy = []
-    
+    inductance_history = {c: 0.0 for c in CIRCUIT_NAMES}
     working_fem_path = "model_working.fem"
     shutil.copy(base_fem_path, working_fem_path)
     
@@ -142,6 +146,11 @@ def run_realtime_femm_foc_simulation():
             current_speed_rpm = current_radpsec * 30 /np.pi 
             delta_deg = current_rad * 180 / np.pi
             theta_mech_cum += delta_deg
+
+            for c_name in CIRCUIT_NAMES:
+                prop = session.mo_getcircuitproperties(c_name)
+                inductance_history[c_name] = prop[1] # Index 3 : Flux Linkage/Current
+                print(f'{c_name}: {inductance_history[c_name]}')
             
             # 데이터 기록
             time_history.append(current_time)
@@ -151,6 +160,8 @@ def run_realtime_femm_foc_simulation():
             i_a_history.append(i_a)
             i_b_history.append(i_b)
             i_c_history.append(i_c)
+            
+            
             torque_history.append(developed_torque)  # 🛠️ 토크 데이터 올바르게 저장
             theta_m_histroy.append(theta_mech_cum)
             
