@@ -6,6 +6,8 @@ import csv
 import numpy as np
 import matplotlib.pyplot as plt
 from femm import FemmSession
+import ctypes
+from ctypes import wintypes
 
 # 한글 폰트 설정 및 마이너스 기호 깨짐 방지
 plt.rcParams['font.family'] = 'sans-serif'
@@ -14,8 +16,67 @@ plt.rcParams['axes.unicode_minus'] = False
 poles = 8    # 극수
 pole_pairs = poles / 2  # 극쌍수 (4)
 CIRCUIT_NAMES = ["A","B","C"]
+# 2. Windows API 함수 로드
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 
+SW_RESTORE = 9
+SWP_NOZORDER = 0x0004
+SWP_FRAMECHANGED = 0x0020
+SWP_SHOWWINDOW = 0x0040
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
+def get_process_name_from_hwnd(hwnd):
+    """윈도우 핸들(HWND)로부터 실행 중인 실제 .exe 파일 경로를 조회"""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if pid.value == 0:
+        return ""
+    
+    # PID를 통해 프로세스 열기
+    h_process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not h_process:
+        return ""
+    
+    exe_buf = ctypes.create_unicode_buffer(1024)
+    size = wintypes.DWORD(len(exe_buf))
+    success = kernel32.QueryFullProcessImageNameW(h_process, 0, exe_buf, ctypes.byref(size))
+    kernel32.CloseHandle(h_process)
+    
+    return exe_buf.value.lower() if success else ""
+
+def set_femm_window_size(width=400, height=300, x=100, y=100):
+    found_hwnds = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def enum_windows_proc(hwnd, lparam):
+        # 화면에 보이는 최상위 창인지 확인
+        if user32.IsWindowVisible(hwnd) and user32.GetParent(hwnd) == 0:
+            exe_path = get_process_name_from_hwnd(hwnd)
+            # 타이틀 대신 프로세스 파일명이 femm.exe / wfemm.exe 인지 직접 확인
+            if exe_path.endswith(("femm_gui.exe", "wfemm.exe")):
+                found_hwnds.append(hwnd)
+        return True
+
+    user32.EnumWindows(enum_windows_proc, 0)
+
+    if not found_hwnds:
+        print("[경고] FEMM 프로세스(femm.exe/wfemm.exe)의 창을 찾지 못했습니다.")
+        return False
+
+    for hwnd in found_hwnds:
+        # 최대화 상태 해제 후 지정 좌표/크기로 강제 설정
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        time.sleep(0.05)
+        user32.SetWindowPos(
+            hwnd, 
+            0, 
+            int(x), int(y), int(width), int(height), 
+            SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW
+        )
+        print(f"[성공] FEMM 프로세스 창 크기 조절 완료: {width}x{height} (위치: x={x}, y={y})")
+
+    return True
 
 def kill_lingering_femm():
     """기존에 열려 있거나 좀비로 남은 FEMM 프로세스들을 강제 종료"""
@@ -66,7 +127,7 @@ def run_realtime_femm_foc_simulation():
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
     print(f"==================================================")
-    print(f" FEMM 단일 세션 유지 및 증분 회전(Delta Degree) FOC 제어 시작")
+    print(f" FEMM IPMSM 1/8 슬라이딩 바운더리 모델 FOC 제어 시작")
     print(f"==================================================")
     
     target_speed_rpm = 141   # 목표 속도 [RPM]
@@ -79,7 +140,7 @@ def run_realtime_femm_foc_simulation():
     
     dt = 0.001    # 제어 주기 (1ms)
     J = 0.036      # 로터 관성 모멘트 [kg·m^2]
-    load_torque = 0.0  # 부하 토크 [Nm]
+    load_torque = 100.0  # 부하 토크 [Nm]
     current_radpsec = 0.0
     total_steps = 100  # 실시간 연동 시뮬레이션 스텝 수
     
@@ -98,10 +159,13 @@ def run_realtime_femm_foc_simulation():
     working_fem_path = "model_working.fem"
     shutil.copy(base_fem_path, working_fem_path)
     
-    session = FemmSession(port=48010, headless=True)
+    session = FemmSession(port=48010, headless=False)
     theta_elec_deg = 0
     try:
         session.opendocument(working_fem_path)
+        #time.sleep(0.5)  # FEMM GUI가 완전히 로드될 시간을 확보
+        # 400x300 크기로 조정
+        set_femm_window_size(width=480, height=480, x=0, y=0)
         cos_130 = np.cos(130*np.pi/180)
         sin_130 = np.sin(130*np.pi/180)
         for step in range(total_steps):
