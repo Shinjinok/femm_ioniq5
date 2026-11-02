@@ -99,7 +99,22 @@ def dq_to_abc(dq0, b):
             ])
     abc = clac2.T @ park_3x3.T @ dq0
     return abc
+def abc_to_dq(i_abc, b):
+    # 전체를 감싸는 바깥쪽 대괄호([ ])가 반드시 있어야 합니다.
+    clac_3x3 = 2/3 * np.array([
+        [1, -1/2, -1/2], 
+        [0, np.sqrt(3)/2, -np.sqrt(3)/2],
+        [1/2, 1/2, 1/2]
+    ])
 
+    park_3x3 = np.array([
+        [np.cos(b), np.sin(b), 0], 
+        [-np.sin(b), np.cos(b), 0],
+        [0, 0, 1]
+    ])
+
+    dq0 = park_3x3 @ clac_3x3 @ i_abc
+    return dq0
 class SpeedControllerPI:
     """모터 속도 제어를 위한 PI 제어기"""
     def __init__(self, kp, ki, output_limits=(-340, 340)):
@@ -140,6 +155,8 @@ def run_realtime_femm_foc_simulation():
     
     dt = 0.001    # 제어 주기 (1ms)
     J = 0.036      # 로터 관성 모멘트 [kg·m^2]
+    Rs = 0.0618  # 선간저항
+    fm = 0.016497753 #np.array([0.016497753, -0.0086603404, -0.0086541372]) #마그네틱 쇄교자속
     load_torque = 100.0  # 부하 토크 [Nm]
     current_radpsec = 0.0
     total_steps = 100  # 실시간 연동 시뮬레이션 스텝 수
@@ -150,9 +167,11 @@ def run_realtime_femm_foc_simulation():
     target_speed_history = []
     iq_ref_history = []
     torque_history = []
+    torque_history2 = []
     i_a_history = []
     i_b_history = []
     i_c_history = []
+    Ls_history = []
  
     theta_m_histroy = []
     inductance_history = {c: 0.0 for c in CIRCUIT_NAMES}
@@ -165,7 +184,7 @@ def run_realtime_femm_foc_simulation():
         session.opendocument(working_fem_path)
         #time.sleep(0.5)  # FEMM GUI가 완전히 로드될 시간을 확보
         # 400x300 크기로 조정
-        set_femm_window_size(width=480, height=480, x=0, y=0)
+        #set_femm_window_size(width=480, height=480, x=0, y=0)
         cos_130 = np.cos(130*np.pi/180)
         sin_130 = np.sin(130*np.pi/180)
         for step in range(total_steps):
@@ -178,11 +197,11 @@ def run_realtime_femm_foc_simulation():
             
             # 2. 전기각 계산 및 역 Park-Clarke 변환으로 삼상 전류 계산
             theta_elec_deg = (theta_mech_cum * pole_pairs) 
-            theta_rad = np.radians(theta_elec_deg)
+            theta_elec_rad = np.radians(theta_elec_deg)
             
-            i_a, i_b, i_c = dq_to_abc([id_ref, iq_ref, 0], theta_rad)
+            i_a, i_b, i_c = dq_to_abc([id_ref, iq_ref, 0], theta_elec_rad)
 
-            # 3. 삼상 전류 고정 설정
+            # 3. 삼상 전류 입력
             session.mi_setcurrent('A', float(i_a))
             session.mi_setcurrent('B', float(i_b))
             session.mi_setcurrent('C', float(i_c))
@@ -198,40 +217,80 @@ def run_realtime_femm_foc_simulation():
             session.mi_loadsolution()
             
             # 6. 토크 추출 (그룹 1 블록 적분)
+            #session.mo_showdensityplot(0, 0, 0, 0, None)
+            #session.mo_showpoints(0)
             session.mo_groupselectblock(1)
             raw_torque = session.mo_blockintegral(22)
             developed_torque = raw_torque * 8.0  # 스케일링 적용
+
+            session.mo_clearblock()
+            #session.mo_setgrid(20, "cart") 
+            session.mo_showvectorplot(1, 100)
+            session.mo_refreshview() 
+
+
+            lamda = []
+            current = []
+            Ls = []
+            Rs = 0.0618  # 선간저항
+            fm = 0.016497753 #np.array([0.016497753, -0.0086603404, -0.0086541372])  # 예: 각 상의 전기자 반작용 계수 (V·s/A) 가정
+            Vdq0 = np.zeros(3)  # 예: 각 상의 전압을 0V로 가정 (실제 시뮬레이션에서는 전압을 계산하거나 입력해야 함)
+            for c_name in CIRCUIT_NAMES:
+                prop = session.mo_getcircuitproperties(c_name)
+                current.append(prop[0])  # Index 0 : Current
+                #voltage_drop = prop[1]  # Index 1 : Voltage Drop
+                lamda.append(prop[2] * 8)  # Index 2 : Flux Linkage
+                #Ls.append(prop[2] / prop[0])  # Inductance 계산 (H) = Flux Linkage / Current
+
+            lamda_dq0 = abc_to_dq(lamda, theta_elec_rad)
+            I_dq0 = abc_to_dq(current, theta_elec_rad)
+            Ls_dq0 = np.divide(lamda_dq0, I_dq0)  # Inductance 계산 (H) = Flux Linkage / Current
+            
+
+            #Te_vector = 1.5 * pole_pairs * (lamda_dq0[0] * I_dq0[1] - lamda_dq0[1] * I_dq0[0])   # 전자기 토크 계산
+            #Te_vector = 1.5 * pole_pairs * np.cross(lamda_dq0, I_dq0)  # 전자기 토크 계산 (벡터 연산)
+            Te_vector = 1.5 * pole_pairs * np.cross(lamda, current)  # 전자기 토크 계산 (벡터 연산)
+            Te_vector = abc_to_dq(Te_vector, theta_elec_rad)  # 벡터를 NumPy 배열로 변환
+            Te_z = Te_vector[2] # 스칼라 토크 값
+
+
+
             
             # 7. 모터 동역학 방정식 계산 및 다음 스텝 회전 각도(delta_deg) 산출
             accel_rad_s2 = (developed_torque - load_torque) / J
             current_radpsec += accel_rad_s2 * dt
+
+            
+
             
             current_rad = current_radpsec * dt
             current_speed_rpm = current_radpsec * 30 /np.pi 
             delta_deg = current_rad * 180 / np.pi
             theta_mech_cum += delta_deg
-
-            for c_name in CIRCUIT_NAMES:
-                prop = session.mo_getcircuitproperties(c_name)
-                inductance_history[c_name] = prop[1] # Index 3 : Flux Linkage/Current
-                print(f'{c_name}: {inductance_history[c_name]}')
             
+
+
+            #s_theta_e = np.array([-np.sin(theta_elec_rad), -np.sin(theta_elec_rad - 2*np.pi/3),  -np.sin(theta_elec_rad + 2*np.pi/3)])
+            #didt_dq0 = np.linalg.inv(np.diag(Ls_dq0)) @ (Vdq0 - Rs * I_dq0 - fm * current_radpsec * s_theta_e)
+            #I_dq0 += didt_dq0 * dt
+            #dwm_dt = (Te_z - load_torque - self.B * wm) / self.J
             # 데이터 기록
             time_history.append(current_time)
             speed_history.append(current_speed_rpm)
             target_speed_history.append(target_speed_rpm)
             iq_ref_history.append(iq_ref)
-            i_a_history.append(i_a)
-            i_b_history.append(i_b)
-            i_c_history.append(i_c)
-            
+            i_a_history.append(current[0])
+            i_b_history.append(current[1])
+            i_c_history.append(current[2])
+            #Ls_history.append(Ls[0])  # 예: 첫 번째 winding의 인덕턴스 저장
             
             torque_history.append(developed_torque)  # 🛠️ 토크 데이터 올바르게 저장
+            torque_history2.append(Te_z)  # 🛠️ 추가 토크 데이터 저장
             theta_m_histroy.append(theta_mech_cum)
             
             # ⚡ 출력 속도 최적화: 매 스텝 대신 10스텝마다 한 번씩 콘솔 출력
             #if (step + 1) % 10 == 0 or step == 0:
-            print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | iq_ref: {iq_ref:6.2f} A | theta(deg): {delta_deg:3.2f} deg | 토크: {developed_torque:6.2f} Nm")
+            print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | iq_ref: {iq_ref:6.2f} A | theta(deg): {delta_deg:3.2f} deg | 토크: {developed_torque:6.2f} Nm | 토크2: {Te_z:6.2f} Nm")
                 
     except Exception as e:
         print(f"[실시간 제어 루프 오류 발생]: {e}")
@@ -317,6 +376,7 @@ def run_realtime_femm_foc_simulation():
     # 4. 전자기 토크 그래프
     plt.subplot(4, 1, 4)
     plt.plot(time_history, torque_history, label='Developed Torque (Shaft)', color='purple', linewidth=2)
+    plt.plot(time_history, torque_history2, label='Calculated Torque (Shaft)', color='green', linewidth=2)
     plt.axhline(y=load_torque, color='orange', linestyle='--', label=f'Load Torque ({load_torque} Nm)')
     plt.xlabel('Time [s]')
     plt.ylabel('Torque [Nm]')

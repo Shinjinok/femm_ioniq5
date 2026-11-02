@@ -256,19 +256,19 @@
 [CircuitProps]  = 3
   <BeginCircuit>
     <CircuitName> = "A"
-    <TotalAmps_re> = 1
+    <TotalAmps_re> = 0
     <TotalAmps_im> = 0
     <CircuitType> = 1
   <EndCircuit>
   <BeginCircuit>
     <CircuitName> = "B"
-    <TotalAmps_re> = 0.029181953748450989
+    <TotalAmps_re> = 0
     <TotalAmps_im> = 0
     <CircuitType> = 1
   <EndCircuit>
   <BeginCircuit>
     <CircuitName> = "C"
-    <TotalAmps_re> = -0.029181953748451027
+    <TotalAmps_re> = 0
     <TotalAmps_im> = 0
     <CircuitType> = 1
   <EndCircuit>
