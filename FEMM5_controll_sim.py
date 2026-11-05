@@ -19,6 +19,7 @@ CIRCUIT_NAMES = ["A","B","C"]
 # 2. Windows API 함수 로드
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
+HEADLESS_MODE = True  # True: GUI 없이 FEMM 실행, False: GUI 모드로 FEMM 실행
 
 SW_RESTORE = 9
 SWP_NOZORDER = 0x0004
@@ -89,27 +90,32 @@ def kill_lingering_femm():
     time.sleep(0.5)
 
 def dq_to_abc(dq0, b):
+    sr32= np.sqrt(3)/2
     clac2 = np.array([[1, -1/2, -1/2],
-                    [0, np.sqrt(3)/2, -np.sqrt(3)/2],
+                    [0, sr32, -sr32],
                     [1/2, 1/2, 1/2]])
+    cb = np.cos(b)
+    sb = np.sin(b)   
     park_3x3 = np.array([
-                [np.cos(b), np.sin(b), 0],
-                [-np.sin(b), np.cos(b), 0],
+                [cb, sb, 0],
+                [-sb, cb, 0],
                 [0, 0, 1]
             ])
     abc = clac2.T @ park_3x3.T @ dq0
     return abc
 def abc_to_dq(i_abc, b):
     # 전체를 감싸는 바깥쪽 대괄호([ ])가 반드시 있어야 합니다.
+    sr32= np.sqrt(3)/2
     clac_3x3 = 2/3 * np.array([
         [1, -1/2, -1/2], 
-        [0, np.sqrt(3)/2, -np.sqrt(3)/2],
+        [0, sr32, -sr32],
         [1/2, 1/2, 1/2]
     ])
-
+    cb = np.cos(b)
+    sb = np.sin(b)
     park_3x3 = np.array([
-        [np.cos(b), np.sin(b), 0], 
-        [-np.sin(b), np.cos(b), 0],
+        [cb, sb, 0], 
+        [-sb, cb, 0],
         [0, 0, 1]
     ])
 
@@ -165,8 +171,9 @@ def run_realtime_femm_foc_simulation():
     time_history = []
     speed_history = []
     target_speed_history = []
-    iq_ref_history = []
+    iq_history = []
     torque_history = []
+    torque_history1 = []
     torque_history2 = []
     i_a_history = []
     i_b_history = []
@@ -178,7 +185,7 @@ def run_realtime_femm_foc_simulation():
     working_fem_path = "model_working.fem"
     shutil.copy(base_fem_path, working_fem_path)
     
-    session = FemmSession(port=48010, headless=False)
+    session = FemmSession(port=48010, headless=HEADLESS_MODE)
     theta_elec_deg = 0
     try:
         session.opendocument(working_fem_path)
@@ -187,20 +194,37 @@ def run_realtime_femm_foc_simulation():
         #set_femm_window_size(width=480, height=480, x=0, y=0)
         cos_130 = np.cos(130*np.pi/180)
         sin_130 = np.sin(130*np.pi/180)
+        id = 0.0
+        iq = 0.0
+        Ld = 1
+        Lq = 1
+        Vd=0
+        Vq=0
         for step in range(total_steps):
             current_time = step * dt
             
-            # 1. 속도 PI 제어기 계산 (q축 기준 전류 iq_ref 산출)
-            i_ref = speed_pi.compute(target_speed_rpm, current_speed_rpm, dt)
-            iq_ref = sin_130 * i_ref
-            id_ref = cos_130 * i_ref
-            
+            # 1. 속도 PI 제어기 계산 (q축 기준 전류 iq 산출)
+            Vref = speed_pi.compute(target_speed_rpm, current_speed_rpm, dt)
+            Vq = sin_130 * Vref
+            Vd = cos_130 * Vref
+
             # 2. 전기각 계산 및 역 Park-Clarke 변환으로 삼상 전류 계산
             theta_elec_deg = (theta_mech_cum * pole_pairs) 
             theta_elec_rad = np.radians(theta_elec_deg)
             
-            i_a, i_b, i_c = dq_to_abc([id_ref, iq_ref, 0], theta_elec_rad)
+            
 
+            lamda_df, lamda_qf, _ = abc_to_dq([0.016497753, -0.0086603404,-0.0086541372], theta_elec_rad)
+            we = current_radpsec * pole_pairs
+
+            did_dt = 1/Ld *(Vd - Rs*id + we * Lq *iq + we * lamda_qf)
+            diq_dt = 1/Lq *(Vq - Rs*iq + we * Ld *id - we * lamda_df)
+           
+
+            i_a, i_b, i_c = dq_to_abc([id, iq, 0], theta_elec_rad)
+            id += did_dt * dt
+            iq += diq_dt * dt
+            
             # 3. 삼상 전류 입력
             session.mi_setcurrent('A', float(i_a))
             session.mi_setcurrent('B', float(i_b))
@@ -223,10 +247,10 @@ def run_realtime_femm_foc_simulation():
             raw_torque = session.mo_blockintegral(22)
             developed_torque = raw_torque * 8.0  # 스케일링 적용
 
-            session.mo_clearblock()
+            #session.mo_clearblock()
             #session.mo_setgrid(20, "cart") 
-            session.mo_showvectorplot(1, 100)
-            session.mo_refreshview() 
+            session.mo_showvectorplot(1, 1)
+            #session.mo_refreshview() 
 
 
             lamda = []
@@ -234,7 +258,8 @@ def run_realtime_femm_foc_simulation():
             Ls = []
             Rs = 0.0618  # 선간저항
             fm = 0.016497753 #np.array([0.016497753, -0.0086603404, -0.0086541372])  # 예: 각 상의 전기자 반작용 계수 (V·s/A) 가정
-            Vdq0 = np.zeros(3)  # 예: 각 상의 전압을 0V로 가정 (실제 시뮬레이션에서는 전압을 계산하거나 입력해야 함)
+            Vd = 0
+            Vq = 0
             for c_name in CIRCUIT_NAMES:
                 prop = session.mo_getcircuitproperties(c_name)
                 current.append(prop[0])  # Index 0 : Current
@@ -245,19 +270,22 @@ def run_realtime_femm_foc_simulation():
             lamda_dq0 = abc_to_dq(lamda, theta_elec_rad)
             I_dq0 = abc_to_dq(current, theta_elec_rad)
             Ls_dq0 = np.divide(lamda_dq0, I_dq0)  # Inductance 계산 (H) = Flux Linkage / Current
-            
+            Ld = Ls_dq0[0]
+            Lq = Ls_dq0[1]
 
             #Te_vector = 1.5 * pole_pairs * (lamda_dq0[0] * I_dq0[1] - lamda_dq0[1] * I_dq0[0])   # 전자기 토크 계산
-            #Te_vector = 1.5 * pole_pairs * np.cross(lamda_dq0, I_dq0)  # 전자기 토크 계산 (벡터 연산)
-            Te_vector = 1.5 * pole_pairs * np.cross(lamda, current)  # 전자기 토크 계산 (벡터 연산)
-            Te_vector = abc_to_dq(Te_vector, theta_elec_rad)  # 벡터를 NumPy 배열로 변환
+            
+            Te_vector = 1.5 * pole_pairs * np.cross(lamda_dq0, I_dq0)  # 전자기 토크 계산 (벡터 연산)
             Te_z = Te_vector[2] # 스칼라 토크 값
+            Te_vector = 1.5 * pole_pairs * np.cross(lamda, current)  # 전자기 토크 계산 (벡터 연산)
+            #Te_vector = abc_to_dq(Te_vector, theta_elec_rad)  # 벡터를 NumPy 배열로 변환
+            Te_z2 = Te_vector[2] # 스칼라 토크 값
 
 
 
             
             # 7. 모터 동역학 방정식 계산 및 다음 스텝 회전 각도(delta_deg) 산출
-            accel_rad_s2 = (developed_torque - load_torque) / J
+            accel_rad_s2 = (Te_z - load_torque) / J
             current_radpsec += accel_rad_s2 * dt
 
             
@@ -272,25 +300,27 @@ def run_realtime_femm_foc_simulation():
 
             #s_theta_e = np.array([-np.sin(theta_elec_rad), -np.sin(theta_elec_rad - 2*np.pi/3),  -np.sin(theta_elec_rad + 2*np.pi/3)])
             #didt_dq0 = np.linalg.inv(np.diag(Ls_dq0)) @ (Vdq0 - Rs * I_dq0 - fm * current_radpsec * s_theta_e)
-            #I_dq0 += didt_dq0 * dt
+  
+
             #dwm_dt = (Te_z - load_torque - self.B * wm) / self.J
             # 데이터 기록
             time_history.append(current_time)
             speed_history.append(current_speed_rpm)
             target_speed_history.append(target_speed_rpm)
-            iq_ref_history.append(iq_ref)
+            iq_history.append(iq)
             i_a_history.append(current[0])
             i_b_history.append(current[1])
             i_c_history.append(current[2])
             #Ls_history.append(Ls[0])  # 예: 첫 번째 winding의 인덕턴스 저장
             
             torque_history.append(developed_torque)  # 🛠️ 토크 데이터 올바르게 저장
-            torque_history2.append(Te_z)  # 🛠️ 추가 토크 데이터 저장
+            torque_history1.append(Te_z)  # 🛠️ 추가 토크 데이터 저장
+            torque_history2.append(Te_z2)  # 🛠️ 추가 토크 데이터 저장
             theta_m_histroy.append(theta_mech_cum)
             
             # ⚡ 출력 속도 최적화: 매 스텝 대신 10스텝마다 한 번씩 콘솔 출력
             #if (step + 1) % 10 == 0 or step == 0:
-            print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | iq_ref: {iq_ref:6.2f} A | theta(deg): {delta_deg:3.2f} deg | 토크: {developed_torque:6.2f} Nm | 토크2: {Te_z:6.2f} Nm")
+            print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | iq: {iq:6.2f} A | theta(deg): {delta_deg:3.2f} deg | 토크: {developed_torque:6.2f} Nm | 토크2: {Te_z:6.2f} Nm")
                 
     except Exception as e:
         print(f"[실시간 제어 루프 오류 발생]: {e}")
@@ -321,12 +351,12 @@ def run_realtime_femm_foc_simulation():
             writer = csv.writer(f)
             writer.writerow([
                 'Time [s]', 'Actual Speed [RPM]', 'Target Speed [RPM]', 
-                'iq_ref [A]', 'Phase A Current [A]', 'Phase B Current [A]', 
+                'iq [A]', 'Phase A Current [A]', 'Phase B Current [A]', 
                 'Phase C Current [A]', 'Torque [Nm]'
             ])
             for t, sp, tsp, iq, va, vb, vc, tq in zip(
                 time_history, speed_history, target_speed_history, 
-                iq_ref_history, i_a_history, i_b_history, i_c_history, torque_history
+                iq_history, i_a_history, i_b_history, i_c_history, torque_history
             ):
                 writer.writerow([t, sp, tsp, iq, va, vb, vc, tq])
         print(f"CSV 저장 완료: {os.path.abspath(csv_filename)}")
@@ -359,7 +389,7 @@ def run_realtime_femm_foc_simulation():
     
     # 2. 제어 입력 전류 그래프
     plt.subplot(4, 1, 2)
-    plt.plot(time_history, iq_ref_history, label='q-axis Current Ref (iq_ref)', color='green', linewidth=2)
+    plt.plot(time_history, iq_history, label='q-axis Current Ref (iq)', color='green', linewidth=2)
     plt.ylabel('Input Current [A]')
     plt.legend(loc='best')
     plt.grid(True)
@@ -375,8 +405,9 @@ def run_realtime_femm_foc_simulation():
     
     # 4. 전자기 토크 그래프
     plt.subplot(4, 1, 4)
-    plt.plot(time_history, torque_history, label='Developed Torque (Shaft)', color='purple', linewidth=2)
-    plt.plot(time_history, torque_history2, label='Calculated Torque (Shaft)', color='green', linewidth=2)
+    plt.plot(time_history, torque_history, label='Developed Torque (Shaft)', color='red', linewidth=2)
+    plt.plot(time_history, torque_history1, label='Calculated Torque1 (Shaft)', color='green', linewidth=2)
+    plt.plot(time_history, torque_history2, label='Calculated Torque2 (Shaft)', color='blue', linewidth=2)
     plt.axhline(y=load_torque, color='orange', linestyle='--', label=f'Load Torque ({load_torque} Nm)')
     plt.xlabel('Time [s]')
     plt.ylabel('Torque [Nm]')
