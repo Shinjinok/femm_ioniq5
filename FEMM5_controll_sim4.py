@@ -157,8 +157,8 @@ def run_femm(session, Iabc, theta_mech_cum):
     lamda = []
     for c_name in CIRCUIT_NAMES:
         prop = session.mo_getcircuitproperties(c_name)
-        current.append(prop[0])
-        lamda.append(prop[2] * 8)
+        current.append(prop[0])  # Index 0 : Current
+        lamda.append(prop[2]  * pole_pairs * 2)
     
     return np.array(lamda), np.array(current), developed_torque
 
@@ -179,6 +179,8 @@ def run_realtime_femm_foc_simulation():
     target_speed_history = []
     vq_ref_history = []
     torque_history = []
+    torque_history2 = []
+    torque_history3 = []
     i_a_history = []
     i_b_history = []
     i_c_history = []
@@ -192,7 +194,7 @@ def run_realtime_femm_foc_simulation():
     session = FemmSession(port=48010, headless=HEADLESS_MODE)
     try:
         dt = 0.001
-        total_steps = 1  # 빠른 시뮬레이션을 위해 조절 가능
+        total_steps = 100  # 빠른 시뮬레이션을 위해 조절 가능
 
         session.opendocument(working_fem_path)
         cos_130 = np.cos(130*np.pi/180)
@@ -205,7 +207,7 @@ def run_realtime_femm_foc_simulation():
         current_radpsec = 0.0
         theta_mech_cum = 0.0
         delta_deg = 0.0
-        load_torque = 150.0
+        load_torque = 100
         target_speed_rpm = 200
         
         lamda_old = np.zeros(3)
@@ -213,41 +215,85 @@ def run_realtime_femm_foc_simulation():
         Iabc = np.zeros(3)
         speed_pi = SpeedControllerPI(kp=0.5, ki=10, output_limits=(-340, 340))
         lamda_old, _, _ = run_femm(session, Iabc, theta_mech_cum)
-
+        id = 0.0
+        iq = 0.0
+        id_old = 0.0
+        iq_old = 0.0
+        
         for step in range(total_steps):
             current_time = step * dt
             
             i_ref = speed_pi.compute(target_speed_rpm, current_speed_rpm, dt)
             iq_ref = sin_130 * i_ref
             id_ref = cos_130 * i_ref
+
+
             
             theta_elec_deg = (theta_mech_cum * pole_pairs) 
             theta_elec_rad = np.radians(theta_elec_deg)
+            we = current_radpsec * pole_pairs
+
+            we = target_speed_rpm * 2 * np.pi / 60 * pole_pairs
 
             Iabc = dq_to_abc2(np.array([id_ref, iq_ref, 0]), theta_elec_rad)
+            Iabc = np.zeros(3)  # 테스트용으로 전류를 0으로 설정 (실제 시뮬레이션에서는 제어기 출력에 따라 Iabc를 계산해야 함)
             
-            lamda, _, developed_torque = run_femm(session, Iabc, theta_mech_cum)
-            lamda_d, lamda_q, _ = abc_to_dq(lamda, theta_elec_rad)
+            lamda, current, developed_torque = run_femm(session, Iabc, theta_mech_cum)
+
             
+
             dlamda_dt = (lamda - lamda_old) / dt
             Vabc = Rs * Iabc + dlamda_dt
-            lamda_old_d, lamda_old_q, _ = abc_to_dq(lamda_old, theta_elec_rad)
-            dlamda_d_dt = (lamda_d - lamda_old_d) / dt
-            dlamda_q_dt = (lamda_q - lamda_old_q) / dt
+            lamda_old = lamda.copy()
 
-            Vd = Rs * id_ref + dlamda_d_dt - current_radpsec * pole_pairs * lamda_q
-            Vq = Rs * iq_ref + dlamda_q_dt + current_radpsec * pole_pairs * lamda_d
+            lamda_d, lamda_q, lamda_0 = abc_to_dq(lamda, theta_elec_rad)
 
-            Vabc2 = dq_to_abc2(np.array([Vd, Vq, 0]), theta_elec_rad)
+            id, iq, i0 = abc_to_dq(current, theta_elec_rad)
+            Ld = (lamda_d - fm) / id if id != 0 else 1
+            Lq = lamda_q / iq if iq != 0 else 1
 
-            vq_ref_history.append(iq_ref)  # q축 지령 전류/전압 대용 기록
-            lamda_old = lamda
+            """ vd_ref = 2 * Rs * id_ref
+            vq_ref = 2 * Rs * iq_ref
 
+            id_dt = (vd_ref - Rs * id + we * lamda_q ) / Ld
+            iq_dt = (vq_ref - Rs * iq - we * lamda_d) / Lq
+
+            id += id_dt * dt
+            iq += iq_dt * dt """
+            vd_ref =  Rs * id + Ld * (id - id_old) / dt - we * Lq * iq
+            vq_ref =  Rs * iq + Lq * (iq - iq_old) / dt + we * Ld * id + we * fm
+
+            id_old = id
+            iq_old = iq
+
+            Vabc2 = dq_to_abc2(np.array([vd_ref, vq_ref, 0]), theta_elec_rad)
+
+           
+            Te_vector = 1.5 * pole_pairs * np.cross([lamda_d, lamda_q, 0], [id, iq, 0])  # 전자기 토크 계산 (벡터 연산)
+
+            s= np.array([-np.sin(-theta_elec_rad), -np.sin(theta_elec_rad - 2/3*np.pi), -np.sin(theta_elec_rad + 2/3*np.pi)])
+
+            s2t = np.sin(2*theta_elec_rad)
+            s2t_m23p = np.sin(2*theta_elec_rad - 2/3*np.pi)
+            s2t_p23p = np.sin(2*theta_elec_rad + 2/3*np.pi)
+            s2t_2pi = np.sin(2*theta_elec_rad + 2*np.pi)
+            Lb = 0.0034
+            dLsdt = 2* Lb * np.array([[s2t, s2t_m23p, s2t_p23p],
+                                    [s2t_m23p, s2t_p23p, s2t_2pi],
+                                    [s2t_p23p, s2t_2pi, s2t_m23p]])
+           
+            Te_vector2 = 0.5 * current @ dLsdt @ current.T #+ fm * s @ current.T  # 전자기 토크 계산 (벡터 연산)
+            
             accel_rad_s2 = (developed_torque - load_torque) / J
             current_radpsec += accel_rad_s2 * dt
             current_rad = current_radpsec * dt
+
+            current_radpsec = target_speed_rpm * 2 * np.pi / 60
             current_speed_rpm = current_radpsec * 30 / np.pi 
             delta_deg = current_rad * 180 / np.pi
+
+            delta_deg = target_speed_rpm * 6 * dt
+
             theta_mech_cum += delta_deg
 
             v_a_history.append(Vabc[0])
@@ -263,7 +309,8 @@ def run_realtime_femm_foc_simulation():
             i_c_history.append(Vabc2[2])
             
             torque_history.append(developed_torque)
-            
+            torque_history2.append(Te_vector[2])  # q축 전자기 토크 기록
+            torque_history3.append(Te_vector2)  # d축 전자기 토크 기록
             print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | v_a: {Vabc[0]:6.2f} V | 토크: {developed_torque:6.2f} Nm")
                 
     except Exception as e:
@@ -271,40 +318,7 @@ def run_realtime_femm_foc_simulation():
         import traceback
         traceback.print_exc()
 
-    # --- ➕ [추가] 속도-토크 곡선(Speed-Torque Curve) 데이터 생성 및 계산 ---
-    print("\n[속도-토크 곡선(Speed-Torque Curve) 데이터 생성 중...]")
-    test_speeds = np.linspace(1, 8000, 50)  # 예: 50 RPM부터 600 RPM까지 10개 지점 테스트
-    curve_torques = []
-    test_beta = np.linspace(np.pi/2, np.pi, 90)  # 테스트용 전기각 범위
-    test_i_ref = 350.0  # 테스트용 기준 전류크기 [A]
-    t_torque_ = []
-    for beta in test_beta:
-        t_iq = np.sin(beta) * test_i_ref
-        t_id = np.cos(beta) * test_i_ref
-        t_Iabc = dq_to_abc2(np.array([t_id, t_iq, 0]), 0.0)
-        _, _, t_torque = run_femm(session, t_Iabc, 0.0)
-        t_torque_.append(t_torque)
-        print(f"전기각: {np.degrees(beta):.2f}° | 토크: {t_torque:.2f} Nm")
-   
-    beta_max = test_beta[np.argmax(t_torque_)]
-    print(f"최대 토크 발생 전기각: {np.degrees(beta_max):.2f}° | 최대 토크: {max(t_torque_):.2f} Nm")
-    try:
-        for spd in test_speeds:
-            # 해당 속도에서의 정상상태 토크 근사치 측정 (정지각도 고정 후 대표 토크 측정)
-            # 고정 전기각 기준 전류 인가 시 발생하는 평균 토크 추출
-            bemf_Rs = fm * spd /60 * 2 *np.pi  / Rs 
-            print(f"속도: {spd:.1f} RPM | 전류: {bemf_Rs:.2f} A")
-            i_ref = test_i_ref - bemf_Rs  # 목표 속도에 대한 전류 지령값 계산
-            t_iq = np.sin(beta_max) * i_ref
-            t_id = np.cos(beta_max) * i_ref
-            t_Iabc = dq_to_abc2(np.array([t_id, t_iq, 0]), 0.0)
-
-            _, _, t_torque = run_femm(session, t_Iabc, 0.0)
-            
-            curve_torques.append(t_torque)
-            print(f"속도: {spd:5.1f} RPM -> 측정 토크: {t_torque:6.2f} Nm")
-    except Exception as e:
-        print(f"속도-토크 곡선 생성 중 오류: {e}")
+    
 
     # --- 시뮬레이션 결과 그래프 표시 (속도-토크 곡선 포함) ---
     print("\n[그래프 생성 중...]")
@@ -321,38 +335,41 @@ def run_realtime_femm_foc_simulation():
     
     # 2. 제어 입력 전류 그래프
     plt.subplot(5, 1, 2)
-    plt.plot(time_history, i_a_history, label='Phase A Current ($I_a$)', color='red', linewidth=1.5)
-    plt.plot(time_history, i_b_history, label='Phase B Current ($I_b$)', color='green', linewidth=1.5)
-    plt.plot(time_history, i_c_history, label='Phase C Current ($I_c$)', color='blue', linewidth=1.5)
-    plt.ylabel('Current [A]')
+    plt.plot(time_history, v_a_history, label='Phase A Voltage ($V_a$)', color='red', linewidth=1.5)
+    plt.plot(time_history, i_a_history, label='Phase A2 Voltage ($I_a$)', color='green', linewidth=1.5)
+    
+    plt.ylabel('Voltage [V]')
     plt.legend(loc='best')
     plt.grid(True)
     
     # 3. 3상 전압 그래프
     plt.subplot(5, 1, 3)
-    plt.plot(time_history, v_a_history, label='Phase A Voltage ($V_a$)', color='red', linewidth=1.5)
-    plt.plot(data:=time_history, v_b_history, label='Phase B Voltage ($V_b$)', color='green', linewidth=1.5)
-    plt.plot(time_history, v_c_history, label='Phase C Voltage ($V_c$)', color='blue', linewidth=1.5)
+    plt.plot(time_history, v_b_history, label='Phase B Voltage ($V_a$)', color='red', linewidth=1.5)
+    plt.plot(data:=time_history, i_b_history, label='Phase B2 Voltage ($V_b$)', color='green', linewidth=1.5)
+    
     plt.ylabel('Voltage [V]')
     plt.legend(loc='best')
     plt.grid(True)
     
     # 4. 전자기 토크(시간축) 그래프
     plt.subplot(5, 1, 4)
-    plt.plot(time_history, torque_history, label='Developed Torque', color='purple', linewidth=2)
-    plt.axhline(y=load_torque, color='orange', linestyle='--', label=f'Load Torque ({load_torque} Nm)')
+    plt.plot(time_history, v_c_history, label='Phase C Voltage ($V_a$)', color='red', linewidth=1.5)
+    plt.plot(data:=time_history, i_c_history, label='Phase C2 Voltage ($V_c$)', color='green', linewidth=1.5)
+    
+    plt.ylabel('Voltage [V]')
+    plt.legend(loc='best')
+    plt.grid(True)
+    
+
+    # 5. [추가] 스피드-토크 곡선 (Speed-Torque Curve) 그래프
+    plt.subplot(5, 1, 5)
+    plt.plot(time_history, torque_history,  color='red', linewidth=2, label='WST Torque [Nm]')
+    plt.plot(time_history, torque_history2, color='blue', linewidth=2, label='dq cross Torque [Nm]')
+    plt.plot(time_history, torque_history3,  color='green', linewidth=2, label='energy differential Torque [Nm]')
     plt.ylabel('Torque [Nm]')
     plt.legend(loc='best')
     plt.grid(True)
 
-    # 5. [추가] 스피드-토크 곡선 (Speed-Torque Curve) 그래프
-    plt.subplot(5, 1, 5)
-    plt.plot(test_speeds, curve_torques, marker='o', color='crimson', linewidth=2, label='Speed-Torque Characteristic')
-    plt.xlabel('Speed [RPM]')
-    plt.ylabel('Max Torque [Nm]')
-    plt.legend(loc='best')
-    plt.grid(True)
-    plt.title('IPMSM Speed-Torque Curve')
     
     plt.tight_layout()
     plt.show()
