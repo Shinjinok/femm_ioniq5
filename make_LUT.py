@@ -150,9 +150,9 @@ def generate_flux_lut_csv_multiprocessing():
     if not os.path.exists(base_fem_path):
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
-    id_grid = np.arange(-100, 100, 25)         # 69개
-    iq_grid = np.arange(-100, 100, 25)         # 69개
-    theta_e_grid = np.arange(-180, 180, 1)    # 37개
+    id_grid = np.linspace(-350, 350, 36)         # 69개
+    iq_grid = np.linspace(-350, 350, 36)         # 69개
+    theta_e_grid = np.linspace(0, 360, 181)    # 37개
 
     all_cases = []
     for theta_e_deg in theta_e_grid:
