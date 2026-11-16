@@ -57,13 +57,13 @@ def load_lut_interpolators():
     iq_axis_d = pivot_df_d.index.get_level_values('Iq_A').unique().values  
     theta_axis_d = pivot_df_d.columns.values                              
     matrix_3d_d = pivot_df_d.values.reshape(len(id_axis_d), len(iq_axis_d), len(theta_axis_d))
-    interp_d = RegularGridInterpolator((id_axis_d, iq_axis_d, theta_axis_d), matrix_3d_d)
+    interp_d = RegularGridInterpolator((id_axis_d, iq_axis_d, theta_axis_d), matrix_3d_d, method="cubic")
 
     id_axis_q = pivot_df_q.index.get_level_values('Id_A').unique().values  
     iq_axis_q = pivot_df_q.index.get_level_values('Iq_A').unique().values  
     theta_axis_q = pivot_df_q.columns.values                               
     matrix_3d_q = pivot_df_q.values.reshape(len(id_axis_q), len(iq_axis_q), len(theta_axis_q))
-    interp_q = RegularGridInterpolator((id_axis_q, iq_axis_q, theta_axis_q), matrix_3d_q)
+    interp_q = RegularGridInterpolator((id_axis_q, iq_axis_q, theta_axis_q), matrix_3d_q, method="cubic")
     
 
     
@@ -74,7 +74,7 @@ def run_bemf_simulation_at_141rpm():
     interp_d, interp_q = load_lut_interpolators()
     
     dt = 0.0001             # 제어 주기 [s] (정밀한 BEMF 파형을 위해 0.2ms 설정)
-    total_time = 0.09        # 총 시뮬레이션 시간 [s] (141 RPM에서 약 2~3 전기각 주기 포함)
+    total_time = 0.1        # 총 시뮬레이션 시간 [s] (141 RPM에서 약 2~3 전기각 주기 포함)
     total_steps = int(total_time / dt)
     
     target_speed_rpm = 141.0  # 목표 BEMF 측정 속도 [RPM]
@@ -104,8 +104,8 @@ def run_bemf_simulation_at_141rpm():
         
         # 전기각 계산 (-180 ~ 180도 정규화)
         theta_elec_deg = (theta_mech_cum * pole_pairs) % 360.0
-        if theta_elec_deg > 180.0:
-            theta_elec_deg -= 360.0
+        if theta_elec_deg < 0.0:
+            theta_elec_deg += 360.0
         theta_elec_rad = np.radians(theta_elec_deg)
         
         # LUT 자속 조회
