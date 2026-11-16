@@ -14,7 +14,13 @@ plt.rcParams['axes.unicode_minus'] = False
 poles = 8
 pole_pairs = poles / 2  # 극쌍수 (4)
 Rs = 0.0618             # 고정자 권선 저항 [Ω]
+def dq_to_abc2(dq0, b):
 
+    T = 2/3 * np.array([np.cos(b), np.cos(b - 2*np.pi/3), np.cos(b + 2*np.pi/3),
+                            -np.sin(b), -np.sin(b - 2*np.pi/3), -np.sin(b + 2*np.pi/3),
+                            1/2, 1/2, 1/2]).reshape(3, 3)
+    abc = np.linalg.inv(T) @ dq0
+    return abc
 def dq_to_abc(dq0, b):
     """dq0 -> abc 역변환 (b: 전기각 [rad])"""
     sr32 = np.sqrt(3) / 2
@@ -125,11 +131,11 @@ def run_bemf_simulation_at_141rpm():
         lamda_q_old = lamda_q
         
         # 역기전력(BEMF) dq 전압 방정식 계산 (전류=0 이므로 저항 낙차 무시 또는 포함)
-        v_d = d_lamda_d_dt - omega_e * lamda_q
-        v_q = d_lamda_q_dt + omega_e * lamda_d
+        v_d = Rs*id_val + d_lamda_d_dt - omega_e * lamda_q
+        v_q = Rs*iq_val + d_lamda_q_dt + omega_e * lamda_d
         
         # dq0 -> 3상 BEMF 전압(Va, Vb, Vc) 변환
-        v_abc = dq_to_abc(np.array([v_d, v_q, 0.0]), theta_elec_rad)
+        v_abc = dq_to_abc2(np.array([v_d, v_q, 0.0]), theta_elec_rad)
         
         # 기계각 업데이트 (141 RPM 유지)
         delta_mech_deg = (current_radpsec * dt) * (180 / np.pi)
