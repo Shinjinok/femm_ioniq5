@@ -45,7 +45,7 @@ def load_lut_abc_interpolators():
     start_t = time.time()
     
     # 3상 원본 쇄교자속 CSV 파일 로드
-    df_a = pd.read_csv('LUT_lamda_abc_keep.csv')
+    df_a = pd.read_csv('LUT_lamda_abc.csv')
    
     pivot_df_a = df_a.pivot_table(
         index=['Id_A', 'Iq_A'], 
@@ -62,7 +62,12 @@ def load_lut_abc_interpolators():
         columns='theta_e_deg', 
         values='lamda_c_Wb'
     )
-    
+    pivot_df_T = df_a.pivot_table(
+            index=['Id_A', 'Iq_A'], 
+            columns='theta_e_deg', 
+            values='Torque'
+    )
+
     # 피벗 테이블로부터 축(Axis) 값과 매트릭스 추출
     id_axis = pivot_df_a.index.get_level_values('Id_A').unique().values 
     iq_axis = pivot_df_a.index.get_level_values('Iq_A').unique().values  
@@ -71,14 +76,14 @@ def load_lut_abc_interpolators():
     matrix_3d_a = pivot_df_a.values.reshape(len(id_axis), len(iq_axis), len(theta_axis))
     matrix_3d_b = pivot_df_b.values.reshape(len(id_axis), len(iq_axis), len(theta_axis))
     matrix_3d_c = pivot_df_c.values.reshape(len(id_axis), len(iq_axis), len(theta_axis))
-
+    matrix_3d_T = pivot_df_T.values.reshape(len(id_axis), len(iq_axis), len(theta_axis))
     # 범위 이탈 방지를 위한 bounds_error=False, fill_value=None 설정
     interp_a = RegularGridInterpolator((id_axis, iq_axis, theta_axis), matrix_3d_a, method="cubic", bounds_error=False, fill_value=None)
     interp_b = RegularGridInterpolator((id_axis, iq_axis, theta_axis), matrix_3d_b, method="cubic", bounds_error=False, fill_value=None)
     interp_c = RegularGridInterpolator((id_axis, iq_axis, theta_axis), matrix_3d_c, method="cubic", bounds_error=False, fill_value=None)
-    
+    interp_T = RegularGridInterpolator((id_axis, iq_axis, theta_axis), matrix_3d_T, method="cubic", bounds_error=False, fill_value=None)
     print(f"[완료] ABC 보간기 생성 완료 (소요 시간: {time.time() - start_t:.2f}초)")
-    return interp_a, interp_b, interp_c, id_axis, iq_axis, theta_axis
+    return interp_a, interp_b, interp_c, interp_T, id_axis, iq_axis, theta_axis
 
 class SpeedControllerPI:
     """모터 속도 제어를 위한 PI 제어기"""
@@ -102,7 +107,7 @@ def check_degree(degree):
     return np.radians(degree), degree
 
 def run_bemf_simulation_at_141rpm():
-    interp_a, interp_b, interp_c, id_axis, iq_axis, theta_axis = load_lut_abc_interpolators()
+    interp_a, interp_b, interp_c, interp_T ,id_axis, iq_axis, theta_axis,= load_lut_abc_interpolators()
     
     dt = 0.0001                # 제어 주기 [s]
     total_time = 2          # 총 시뮬레이션 시간 [s]
@@ -181,6 +186,11 @@ def run_bemf_simulation_at_141rpm():
         lamda_dq0_th1 = abc_to_dq(lamda_abc_th1, dth1_rad )
         lamda_dq0_th2 = abc_to_dq(lamda_abc_th2, dth2_rad ) 
 
+        query_point_T = np.array([[id_val, iq_val, theta_elec_deg]])
+                
+        torque = interp_T(query_point_T)[0]
+        
+
         # 인덕턴스 추정 안전장치
         Ld = lamda_dq0_id1[0] - lamda_dq0[0]
         Lq = lamda_dq0_iq1[1] - lamda_dq0[1]
@@ -213,7 +223,7 @@ def run_bemf_simulation_at_141rpm():
         Te_z = 1.5 * pole_pairs * (lamda_dq0_0[0] * iq_val + (Ld - Lq) * id_val * iq_val)
         Torque_histroy.append(Te_z)
         Te_cross = 1.5 * pole_pairs *np.linalg.cross(lamda_dq0 ,np.array([id_val,iq_val,0]))
-        Torque_histroy2.append(Te_cross[2])
+        Torque_histroy2.append(torque)
 
         # 모터 동역학 방정식 계산 및 회전 각도 산출
         accel_rad_s2 = (Te_z - load_torque) / J
