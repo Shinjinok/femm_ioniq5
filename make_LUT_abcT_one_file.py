@@ -11,6 +11,7 @@ import multiprocessing as mp
 from multiprocessing import Pool
 from femm import FemmSession
 from tqdm import tqdm  # 실시간 프로그래스 바 출력을 위한 라이브러리
+from datetime import datetime
 
 poles = 8                  # 극수
 pole_pairs = poles // 2    # 극쌍수 (4)
@@ -164,7 +165,11 @@ def generate_flux_lut_csv_multiprocessing():
     sys.stdout.write("==================================================\n")
     sys.stdout.flush()
 
-    file = "LUT_lamda_abcT.csv"
+    # 현재 날짜 및 시간 가져오기
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # 파일명 생성
+    file = f"LUT_lamda_abcT_{now}.csv"
     start_time = time.time()
 
     try:
@@ -176,7 +181,7 @@ def generate_flux_lut_csv_multiprocessing():
                 # chunksize를 적절히 조절하여 IPC 오버헤드를 줄이면서도 실시간 반영 (예: 5 또는 10)
                 # tqdm을 사용하여 터미널에 아름다운 프로그래스 바와 남은 시간(ETA)을 출력합니다.
                 with tqdm(total=total_cases, desc="LUT 생성 중", unit="case") as pbar:
-                    for res, err in pool.imap_unordered(worker_single_task, all_cases, chunksize=5):
+                    for res, err in pool.imap_unordered(worker_single_task, all_cases, chunksize=10):
                         if err is not None:
                             tqdm.write(f"[오류 발생]: {err}")
                             pbar.update(1)
