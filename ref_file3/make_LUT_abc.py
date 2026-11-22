@@ -8,7 +8,7 @@ import socket
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import Pool
-from femm import FemmSession
+from ref_file3.femm import FemmSession
 
 poles = 8               # 극수
 pole_pairs = poles / 2   # 극쌍수 (4)

@@ -9,7 +9,7 @@ import glob
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import Pool
-from femm import FemmSession
+from ref_file3.femm import FemmSession
 from tqdm import tqdm  # 실시간 프로그래스 바 출력을 위한 라이브러리
 from datetime import datetime
 

@@ -6,7 +6,7 @@ import csv
 from matplotlib.pylab import beta
 import numpy as np
 import matplotlib.pyplot as plt
-from femm import FemmSession
+from ref_file3.femm import FemmSession
 import ctypes
 from ctypes import wintypes
 
@@ -213,86 +213,42 @@ def run_realtime_femm_foc_simulation():
         lamda_old = np.zeros(3)
         Vabc = np.zeros(3)
         Iabc = np.zeros(3)
-        speed_pi = SpeedControllerPI(kp=0.5, ki=10, output_limits=(-340, 340))
+        lamda = np.zeros(3)
+        speed_pi = SpeedControllerPI(kp=0.1, ki=0, output_limits=(-340, 340))
         lamda_old, _, _ = run_femm(session, Iabc, theta_mech_cum)
         id = 0.0
         iq = 0.0
-        id_old = 0.0
-        iq_old = 0.0
-        
+        vd = 0
+        vq = 0
+        dlamda_dt = np.zeros(3)
         for step in range(total_steps):
             current_time = step * dt
             
-            i_ref = speed_pi.compute(target_speed_rpm, current_speed_rpm, dt)
-            iq_ref = sin_130 * i_ref
-            id_ref = cos_130 * i_ref
-
-
-            
             theta_elec_deg = (theta_mech_cum * pole_pairs) 
             theta_elec_rad = np.radians(theta_elec_deg)
-            we = current_radpsec * pole_pairs
+            
+            v_ref = speed_pi.compute(target_speed_rpm, current_speed_rpm, dt)
+            vq_ref = sin_130 * v_ref
+            vd_ref = cos_130 * v_ref
+            Vabc = dq_to_abc(np.array([vd_ref, vq_ref , 0]), theta_elec_rad)
+            Vabc = np.clip(Vabc,-500,500)
+            dlamda_dt = (lamda - lamda_old) / dt
 
-            we = target_speed_rpm * 2 * np.pi / 60 * pole_pairs
-
-            Iabc = dq_to_abc2(np.array([id_ref, iq_ref, 0]), theta_elec_rad)
-            Iabc = np.zeros(3)  # 테스트용으로 전류를 0으로 설정 (실제 시뮬레이션에서는 제어기 출력에 따라 Iabc를 계산해야 함)
+        
+            Iabc = (Vabc - dlamda_dt)/ Rs 
+            Iabc = np.clip(Iabc, -340, 340)
             
             lamda, current, developed_torque = run_femm(session, Iabc, theta_mech_cum)
-
             
-
-            dlamda_dt = (lamda - lamda_old) / dt
-            Vabc = Rs * Iabc + dlamda_dt
             lamda_old = lamda.copy()
-
-            lamda_d, lamda_q, lamda_0 = abc_to_dq(lamda, theta_elec_rad)
-
-            id, iq, i0 = abc_to_dq(current, theta_elec_rad)
-            Ld = (lamda_d - fm) / id if id != 0 else 1
-            Lq = lamda_q / iq if iq != 0 else 1
-
-            """ vd_ref = 2 * Rs * id_ref
-            vq_ref = 2 * Rs * iq_ref
-
-            id_dt = (vd_ref - Rs * id + we * lamda_q ) / Ld
-            iq_dt = (vq_ref - Rs * iq - we * lamda_d) / Lq
-
-            id += id_dt * dt
-            iq += iq_dt * dt """
-            vd_ref =  Rs * id + Ld * (id - id_old) / dt - we * Lq * iq
-            vq_ref =  Rs * iq + Lq * (iq - iq_old) / dt + we * Ld * id + we * fm
-
-            id_old = id
-            iq_old = iq
-
-            Vabc2 = dq_to_abc2(np.array([vd_ref, vq_ref, 0]), theta_elec_rad)
-
-           
-            Te_vector = 1.5 * pole_pairs * np.cross([lamda_d, lamda_q, 0], [id, iq, 0])  # 전자기 토크 계산 (벡터 연산)
-
-            s= np.array([-np.sin(-theta_elec_rad), -np.sin(theta_elec_rad - 2/3*np.pi), -np.sin(theta_elec_rad + 2/3*np.pi)])
-
-            s2t = np.sin(2*theta_elec_rad)
-            s2t_m23p = np.sin(2*theta_elec_rad - 2/3*np.pi)
-            s2t_p23p = np.sin(2*theta_elec_rad + 2/3*np.pi)
-            s2t_2pi = np.sin(2*theta_elec_rad + 2*np.pi)
-            Lb = 0.0034
-            dLsdt = 2* Lb * np.array([[s2t, s2t_m23p, s2t_p23p],
-                                    [s2t_m23p, s2t_p23p, s2t_2pi],
-                                    [s2t_p23p, s2t_2pi, s2t_m23p]])
-           
-            Te_vector2 = 0.5 * current @ dLsdt @ current.T #+ fm * s @ current.T  # 전자기 토크 계산 (벡터 연산)
-            
+                        
             accel_rad_s2 = (developed_torque - load_torque) / J
             current_radpsec += accel_rad_s2 * dt
-            current_rad = current_radpsec * dt
+            delta_rad = current_radpsec * dt
 
-            current_radpsec = target_speed_rpm * 2 * np.pi / 60
+            
             current_speed_rpm = current_radpsec * 30 / np.pi 
-            delta_deg = current_rad * 180 / np.pi
-
-            delta_deg = target_speed_rpm * 6 * dt
+            delta_deg = delta_rad * 180 / np.pi
 
             theta_mech_cum += delta_deg
 
@@ -304,13 +260,13 @@ def run_realtime_femm_foc_simulation():
             speed_history.append(current_speed_rpm)
             target_speed_history.append(target_speed_rpm)
 
-            i_a_history.append(Vabc2[0])
-            i_b_history.append(Vabc2[1])
-            i_c_history.append(Vabc2[2])
+            i_a_history.append(Iabc[0])
+            i_b_history.append(Iabc[1])
+            i_c_history.append(Iabc[2])
             
             torque_history.append(developed_torque)
-            torque_history2.append(Te_vector[2])  # q축 전자기 토크 기록
-            torque_history3.append(Te_vector2)  # d축 전자기 토크 기록
+           # torque_history2.append(Te_vector)  # q축 전자기 토크 기록
+            #torque_history3.append(Te_vector2)  # d축 전자기 토크 기록
             print(f"[Step {step+1:04d}] 속도: {current_speed_rpm:7.2f} RPM | v_a: {Vabc[0]:6.2f} V | 토크: {developed_torque:6.2f} Nm")
                 
     except Exception as e:
@@ -336,7 +292,9 @@ def run_realtime_femm_foc_simulation():
     # 2. 제어 입력 전류 그래프
     plt.subplot(5, 1, 2)
     plt.plot(time_history, v_a_history, label='Phase A Voltage ($V_a$)', color='red', linewidth=1.5)
-    plt.plot(time_history, i_a_history, label='Phase A2 Voltage ($I_a$)', color='green', linewidth=1.5)
+    plt.plot(time_history, v_b_history, label='Phase A Voltage ($V_a$)', color='green', linewidth=1.5)
+    plt.plot(time_history, v_c_history, label='Phase A Voltage ($V_a$)', color='blue', linewidth=1.5)
+    #plt.plot(time_history, i_a_history, label='Phase A2 Voltage ($I_a$)', color='green', linewidth=1.5)
     
     plt.ylabel('Voltage [V]')
     plt.legend(loc='best')
@@ -344,19 +302,20 @@ def run_realtime_femm_foc_simulation():
     
     # 3. 3상 전압 그래프
     plt.subplot(5, 1, 3)
-    plt.plot(time_history, v_b_history, label='Phase B Voltage ($V_a$)', color='red', linewidth=1.5)
-    plt.plot(data:=time_history, i_b_history, label='Phase B2 Voltage ($V_b$)', color='green', linewidth=1.5)
+    plt.plot(time_history, i_a_history, label='Phase A Voltage ($V_a$)', color='red', linewidth=1.5)
+    plt.plot(time_history, i_b_history, label='Phase A Voltage ($V_a$)', color='green', linewidth=1.5)
+    plt.plot(time_history, i_c_history, label='Phase A Voltage ($V_a$)', color='blue', linewidth=1.5)
     
-    plt.ylabel('Voltage [V]')
+    plt.ylabel('Ampere [A]')
     plt.legend(loc='best')
     plt.grid(True)
     
     # 4. 전자기 토크(시간축) 그래프
     plt.subplot(5, 1, 4)
-    plt.plot(time_history, v_c_history, label='Phase C Voltage ($V_a$)', color='red', linewidth=1.5)
-    plt.plot(data:=time_history, i_c_history, label='Phase C2 Voltage ($V_c$)', color='green', linewidth=1.5)
+    plt.plot(time_history, v_a_history, label='Phase C Voltage ($V_a$)', color='red', linewidth=1.5)
+    plt.plot(data:=time_history, i_a_history, label='Phase C2 Voltage ($V_c$)', color='green', linewidth=1.5)
     
-    plt.ylabel('Voltage [V]')
+    plt.ylabel('phase differ')
     plt.legend(loc='best')
     plt.grid(True)
     
@@ -364,8 +323,8 @@ def run_realtime_femm_foc_simulation():
     # 5. [추가] 스피드-토크 곡선 (Speed-Torque Curve) 그래프
     plt.subplot(5, 1, 5)
     plt.plot(time_history, torque_history,  color='red', linewidth=2, label='WST Torque [Nm]')
-    plt.plot(time_history, torque_history2, color='blue', linewidth=2, label='dq cross Torque [Nm]')
-    plt.plot(time_history, torque_history3,  color='green', linewidth=2, label='energy differential Torque [Nm]')
+    #plt.plot(time_history, torque_history2, color='blue', linewidth=2, label='dq cross Torque [Nm]')
+   # plt.plot(time_history, torque_history3,  color='green', linewidth=2, label='energy differential Torque [Nm]')
     plt.ylabel('Torque [Nm]')
     plt.legend(loc='best')
     plt.grid(True)

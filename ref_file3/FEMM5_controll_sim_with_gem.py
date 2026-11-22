@@ -5,7 +5,7 @@ import subprocess
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
-from femm import FemmSession
+from ref_file3.femm import FemmSession
 
 # 한글 폰트 설정 및 마이너스 기호 깨짐 방지
 plt.rcParams['font.family'] = 'sans-serif'

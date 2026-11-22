@@ -130,18 +130,76 @@ def check_degree(degree):
         degree += 360.0
     return np.radians(degree), degree
 
-def run_bemf_simulation_at_141rpm():
-    interp_a, interp_b, interp_c, interp_T ,id_axis, iq_axis, theta_axis,= load_lut_abc_interpolators()
+interp_a, interp_b, interp_c, interp_T ,id_axis, iq_axis, theta_axis,= load_lut_abc_interpolators()
+def cal_lambda(id_val,iq_val,theta_elec_deg):
+    theta_elec_rad = np.radians(theta_elec_deg)
+    # 0 전류 쇄교자속
+    query_point0 = np.array([[0, 0, theta_elec_deg]])
+    lamda_abc_0 = np.array([interp_a(query_point0)[0], interp_b(query_point0)[0], interp_c(query_point0)[0]])
+    lamda_dq0_0 = abc_to_dq(lamda_abc_0, theta_elec_rad)
     
-    dt = 0.001                # 제어 주기 [s]
-    total_time = 1          # 총 시뮬레이션 시간 [s]
+    #현재 쇄교자속 조회
+    query_point = np.array([[id_val, iq_val, theta_elec_deg]])
+    lamda_abc = np.array([interp_a(query_point)[0], interp_b(query_point)[0], interp_c(query_point)[0]])
+    lamda_dq0 = abc_to_dq(lamda_abc, theta_elec_rad)
+
+    #전류 스텝
+    current_step = 1 #A
+    #Ld 계산
+    query_point_id1 = np.array([[id_val - current_step, iq_val, theta_elec_deg]])
+    query_point_id2 = np.array([[id_val + current_step, iq_val, theta_elec_deg]])
+    lamda_abc_id1 = np.array([interp_a(query_point_id1)[0], interp_b(query_point_id1)[0], interp_c(query_point_id1)[0]])
+    lamda_abc_id2 = np.array([interp_a(query_point_id2)[0], interp_b(query_point_id2)[0], interp_c(query_point_id2)[0]])
+    lamda_dq0_id1 = abc_to_dq(lamda_abc_id1, theta_elec_rad)-lamda_dq0_0
+    lamda_dq0_id2 = abc_to_dq(lamda_abc_id2, theta_elec_rad)-lamda_dq0_0
+
+    
+    Ld = (lamda_dq0_id2 - lamda_dq0_id1)/(2*current_step)
+    
+
+    #Lq 계산
+    query_point_iq1 = np.array([[id_val, iq_val - current_step, theta_elec_deg]])
+    query_point_iq2 = np.array([[id_val, iq_val + current_step, theta_elec_deg]])
+    lamda_abc_iq1 = np.array([interp_a(query_point_iq1)[0], interp_b(query_point_iq1)[0], interp_c(query_point_iq1)[0]])
+    lamda_abc_iq2 = np.array([interp_a(query_point_iq2)[0], interp_b(query_point_iq2)[0], interp_c(query_point_iq2)[0]])
+    lamda_dq0_iq1 = abc_to_dq(lamda_abc_iq1, theta_elec_rad)
+    lamda_dq0_iq2 = abc_to_dq(lamda_abc_iq2, theta_elec_rad)
+
+    
+    Lq = (lamda_dq0_iq2 - lamda_dq0_iq1)/(2*current_step)
+    
+    Ldq = np.array([[Ld[0],Lq[0],0],[Ld[1],Lq[1],0],[Ld[2],Lq[2],1]])
+    #각도 변위
+    degree_step = 1.0
+    #감마 계산
+    dth1_rad, dth1_deg = check_degree(theta_elec_deg - degree_step)
+    dth2_rad, dth2_deg = check_degree(theta_elec_deg + degree_step)
+    
+    query_point_th1 = np.array([[id_val, iq_val, dth1_deg]])
+    query_point_th2 = np.array([[id_val, iq_val, dth2_deg]])
+    lamda_abc_th1 = np.array([interp_a(query_point_th1)[0], interp_b(query_point_th1)[0], interp_c(query_point_th1)[0]])
+    lamda_abc_th2 = np.array([interp_a(query_point_th2)[0], interp_b(query_point_th2)[0], interp_c(query_point_th2)[0]])
+    lamda_dq0_th1 = abc_to_dq(lamda_abc_th1, dth1_rad )
+    lamda_dq0_th2 = abc_to_dq(lamda_abc_th2, dth2_rad ) 
+    
+    gamma_dq0 = (lamda_dq0_th2 - lamda_dq0_th1 ) / (2 * np.radians(degree_step))
+
+    return lamda_abc, lamda_dq0_0, lamda_dq0, Ldq, gamma_dq0
+
+
+def run_bemf_simulation_at_141rpm():
+    
+    
+    dt = 0.001
+    total_time = 0.4
+    target_speed_rpm = 141 # 목표 BEMF 측정 속도 [RPM]
+
+    #total_time = 1/(target_speed_rpm*4/60)    # 총 시뮬레이션 시간 [s]
+    #total_steps = 1000
+    #dt = total_time/total_steps
+    #print(total_time, dt)
     total_steps = int(total_time / dt)
     
-    target_speed_rpm = 141.0  # 목표 BEMF 측정 속도 [RPM]
-    current_radpsec = 0# target_speed_rpm * np.pi / 30.0
-    omega_e = current_radpsec * pole_pairs
-    
-    theta_mech_cum = 0.0      # 누적 기계각 [deg]
     
     # 히스토리 기록용 리스트
     time_history = []
@@ -155,135 +213,87 @@ def run_bemf_simulation_at_141rpm():
     Torque_histroy = []
     Torque_histroy2 = []
     Torque_histroy3 = []
-    id_val = 0.0  # 무부하 BEMF이므로 전류는 0
-    iq_val = 0.0
+    
     
     print(f"\n==================================================")
     print(f" IPMSM 141 RPM BEMF(역기전력) 3상 전압 시뮬레이션 시작 (ABC LUT 연동)")
     print(f"==================================================")
-    
-    theta_elec_rad_old = 0.0
-    lamda_dq0_old = np.zeros(3)
-    lamda_abc_old = np.zeros(3)
-    V_dq0 = np.zeros(3)
-    Vd = 0
-    Vq = 0
 
     xJ = np.array([
         [0, -1,  0],
         [1,  0,  0],
         [0,  0,  0]
     ])
-    load_torque = 10
+    load_torque =0
     bemf = np.zeros(3)
     temp1 = np.zeros(3)
     temp2 = np.zeros(3)
     i_dq0 = np.zeros(3)
+   
+    V_abc = np.zeros(3)
+    V_dq0 = np.zeros(3)
+    V_dq1 = np.zeros(3)
+    dlamda_dq0_dt2 = np.zeros(3)
+    dlamda_dq0_dt = np.zeros(3)
+    lamda_abc = np.zeros(3)
+    lamda_dq0_old = np.zeros(3)
+    lamda_abc_old = np.zeros(3)
+    V_dq0 = np.zeros(3)
+    current_radpsec = 0
+    theta_mech_cum = 0.0 
+    did_dt=np.zeros(3)  
+    i_dq0_old = np.zeros(3)
+
+    speed = SpeedControllerPI(0.1,1)
+
     for step in range(total_steps):
         current_time = step * dt
+
         
         # 전기각 계산 (0 ~ 360도 정규화)
         theta_elec_rad, theta_elec_deg = check_degree(theta_mech_cum * pole_pairs)
-
-        # 0 전류 쇄교자속
-        query_point0 = np.array([[0, 0, theta_elec_deg]])
-        lamda_abc_0 = np.array([interp_a(query_point0)[0], interp_b(query_point0)[0], interp_c(query_point0)[0]])
-        lamda_dq0_0 = abc_to_dq(lamda_abc_0, theta_elec_rad)
-        
-        #현재 쇄교자속 조회
-        query_point = np.array([[id_val, iq_val, theta_elec_deg]])
-        lamda_abc = np.array([interp_a(query_point)[0], interp_b(query_point)[0], interp_c(query_point)[0]])
-        lamda_dq0 = abc_to_dq(lamda_abc, theta_elec_rad)
-
-        #전류 스텝
-        current_step = 10 #A
-        #Ld 계산
-        query_point_id1 = np.array([[id_val - current_step, iq_val, theta_elec_deg]])
-        query_point_id2 = np.array([[id_val + current_step, iq_val, theta_elec_deg]])
-        lamda_abc_id1 = np.array([interp_a(query_point_id1)[0], interp_b(query_point_id1)[0], interp_c(query_point_id1)[0]])
-        lamda_abc_id2 = np.array([interp_a(query_point_id2)[0], interp_b(query_point_id2)[0], interp_c(query_point_id2)[0]])
-        lamda_dq0_id1 = abc_to_dq(lamda_abc_id1, theta_elec_rad)
-        lamda_dq0_id2 = abc_to_dq(lamda_abc_id2, theta_elec_rad)
-
-        Ld = (lamda_dq0_id2[0] - lamda_dq0_id1[0])/(2*current_step)
-
-        #Lq 계산
-        query_point_iq1 = np.array([[id_val, iq_val - current_step, theta_elec_deg]])
-        query_point_iq2 = np.array([[id_val, iq_val + current_step, theta_elec_deg]])
-        lamda_abc_iq1 = np.array([interp_a(query_point_iq1)[0], interp_b(query_point_iq1)[0], interp_c(query_point_iq1)[0]])
-        lamda_abc_iq2 = np.array([interp_a(query_point_iq2)[0], interp_b(query_point_iq2)[0], interp_c(query_point_iq2)[0]])
-        lamda_dq0_iq1 = abc_to_dq(lamda_abc_iq1, theta_elec_rad)
-        lamda_dq0_iq2 = abc_to_dq(lamda_abc_iq2, theta_elec_rad)
-
-        Lq = (lamda_dq0_iq2[1] - lamda_dq0_iq1[1])/(2*current_step)
-
-        #각도 변위
-        degree_step = 10
-        #감마 계산
-        dth1_rad, dth1_deg = check_degree(theta_elec_deg - degree_step)
-        dth2_rad, dth2_deg = check_degree(theta_elec_deg + degree_step)
-
-        query_point_th1 = np.array([[id_val, iq_val, dth1_deg]])
-        query_point_th2 = np.array([[id_val, iq_val, dth2_deg]])
-        lamda_abc_th1 = np.array([interp_a(query_point_th1)[0], interp_b(query_point_th1)[0], interp_c(query_point_th1)[0]])
-        lamda_abc_th2 = np.array([interp_a(query_point_th2)[0], interp_b(query_point_th2)[0], interp_c(query_point_th2)[0]])
-        lamda_dq0_th1 = abc_to_dq(lamda_abc_th1, dth1_rad )
-        lamda_dq0_th2 = abc_to_dq(lamda_abc_th2, dth2_rad ) 
-
-        gamma_dq0 = (lamda_dq0_th2 - lamda_dq0_th1 ) / (degree_step*np.pi/90)
-        
-        
-
-        # 인덕턴스 추정 안전장치
-        
-        
-        
+        lamda_abc, lamda_dq0_0, lamda_dq0, Ldq, gamma_dq0 = cal_lambda(i_dq0[0], i_dq0[1], theta_elec_deg)
+       
         We = current_radpsec*pole_pairs
-        Iabc = np.zeros(3)
+    
+        if step > 0 :
+                    
+            V_abc = (lamda_abc - lamda_abc_old) / dt 
 
-        if step ==0 :
-            V_abc = np.zeros(3)
-            V_dq0 = np.zeros(3)
-            V_wd =0
-            V_wq=0
+            dlamda_dq0_dt =  (lamda_dq0  - lamda_dq0_old) /dt
+            We_cross_lamda_dq0 =  np.linalg.cross(np.array([0,0,We]) , lamda_dq0) #=We * xJ @ lamda_dq0 동일 값
+            V_dq0 = dlamda_dq0_dt + We_cross_lamda_dq0
+ 
+            Ls_di_dq0_dt = Ldq @ (i_dq0 - i_dq0_old)/dt
+            We_gamma_dq0 = We * gamma_dq0
+            dlamda_dq0_dt2 = Ls_di_dq0_dt + We_gamma_dq0
+            V_dq1 = Ls_di_dq0_dt + We_gamma_dq0  +  We_cross_lamda_dq0 
             
-        else :
-            #Iabc = dq_to_abc(np.array([id_val,iq_val,0]),theta_elec_rad)
-            V_abc = (lamda_abc - lamda_abc_old) / dt  #main reference
-            bemf = (lamda_dq0  - lamda_dq0_old) /dt  +  We * xJ @ lamda_dq0  #V_abc와 일치
-            #did_dt = 1/Ld * (Vd - Rs*id_val + We * Lq * iq_val) 
-            #diq_dt = 1/Lq * (Vq - Rs*iq_val - We * (Ld * id_val + lamda_dq0_0[0]))
-            
-            #did_dt = (-Rs*i_dq0 - np.linalg.cross(np.array([0,0,We]) , lamda_dq0)) / np.array([Ld, Lq, 1])
+            v_ref = speed.compute(target_speed_rpm, current_speed_rpm, dt)
+            vq_ref = np.sin(np.radians(130)) * v_ref
+            vd_ref = np.cos(np.radians(130)) * v_ref
+            V_dq0[0] = vd_ref
+            V_dq0[1] = vq_ref
+            V_dq0[2] = 0
+           
+            did_dt[0] = 1/max(Ldq[0,0],1e-5) * (V_dq0[0] - Rs*i_dq0[0] + We * Ldq[1,1] * i_dq0[1]) 
+            did_dt[1] = 1/max(Ldq[1,1],1e-5) * (V_dq0[1] - Rs*i_dq0[1] - We * (Ldq[0,0] * i_dq0[0] + lamda_dq0_0[0]))
 
-            temp1 = np.array([- We * Lq * iq_val,  We * (Ld * id_val + lamda_dq0_0[0]),0])
-            temp2 =  np.linalg.cross(np.array([0,0,We]) , lamda_dq0)
-
-            #bemf = We * (gamma_dq0  +  J_ @ lamda_dq0) #BEMF
-            did_dt = (-Rs*i_dq0 - We * (gamma_dq0  +  xJ @ lamda_dq0) ) / np.array([Ld, Lq, 1]) 
-            
-            
-            #id_val += did_dt * dt
-            #iq_val += diq_dt * dt
+            #did_dt = (-Rs*i_dq0 -  We * (  xJ @ lamda_dq0) )/ np.array([Ldq[0,0], Ldq[1,1], 1]) 
+            did_dt[2] = 0
+            #did_dt = np.linalg.inv(Ldq) @ (-Rs*i_dq0 -  We * (gamma_dq0 +  xJ @ lamda_dq0) )
             i_dq0 += did_dt * dt
 
         
-       # W = 0.5*i_dq0 @ lamda_abc
-
         T_cog = 1.5 * pole_pairs * gamma_dq0 @ i_dq0
-        #두개 일치
-        id_val = i_dq0[0]
-        iq_val = i_dq0[1]
-        Te_z = 1.5 * pole_pairs * (lamda_dq0_0[0] * iq_val + (Ld - Lq) * id_val * iq_val) + T_cog
-
+  
         #Te_z = 1.5 * pole_pairs * (lamda_dq0_0[0] * i_dq0[1] + (Ld - Lq) * i_dq0[0] * i_dq0[1]) + T_cog
+
+        Te_z = 1.5 * pole_pairs * (lamda_dq0_0[0] * i_dq0[1] + (Ldq[0,0] - Ldq[1,1]) * i_dq0[0] * i_dq0[1]) + T_cog
         
         Te_z2 = (1.5 * pole_pairs *np.linalg.cross(lamda_dq0 ,i_dq0))[2] + T_cog
 
-
-
-        
-        query_point_T = np.array([[id_val, iq_val, theta_elec_deg]])
+        query_point_T = np.array([[i_dq0[0], i_dq0[1], theta_elec_deg]])
         torque = interp_T(query_point_T)[0]
 
         Torque_histroy.append(Te_z)
@@ -297,71 +307,95 @@ def run_bemf_simulation_at_141rpm():
 
         lamda_abc_old = lamda_abc
         lamda_dq0_old = lamda_dq0
-        theta_elec_rad_old = theta_elec_rad
+        theta_elec_deg_old = theta_elec_deg
+        i_dq0_old = i_dq0
 
-        V_abc_from_bemf = dq_to_abc(bemf, theta_elec_rad)
-        V_dq0_from_abc = abc_to_dq(V_abc, theta_elec_rad)
+     
         
         # 기계각 업데이트 (141 RPM 유지)
+        #current_radpsec = target_speed_rpm/60*2*np.pi
         delta_mech_deg = (current_radpsec * dt) * (180 / np.pi)
         theta_mech_cum += delta_mech_deg
         
         # 기록
         time_history.append(current_time)
-        speed_history.append(-current_speed_rpm)
+        speed_history.append(current_speed_rpm)
         v_a_history.append(V_abc)
-        v_a0_history.append(V_abc_from_bemf)
-        v_d_history.append(bemf)
-        v_d1_history.append(V_dq0_from_abc)
-        idq0_history.append(i_dq0)
-        temp1_history.append(temp1)
-        temp2_history.append(temp2)
+        v_a0_history.append(dq_to_abc(V_dq1, theta_elec_rad))
+        
+        v_d_history.append(abc_to_dq(V_abc,theta_elec_rad))
+        v_d1_history.append(V_dq1)
+        
+        idq0_history.append(dq_to_abc(i_dq0, theta_elec_rad))
+        temp1_history.append(dlamda_dq0_dt)
+        temp2_history.append(dlamda_dq0_dt2)
     print("[완료] BEMF 시뮬레이션 연산 완료. 그래프 생성 중...")
 
     # --- 시각화 ---
-    fig, axes = plt.subplots(4, 1, figsize=(5, 10), sharex=True)
+    fig, axes = plt.subplots(2, 2, figsize=(16*2/3, 9*2/3), sharex=True)
     colors_rgb=['red','green','blue']
     
     # 1. 속도 (141 RPM)
-    axes[0].plot(time_history, Torque_histroy, label='$\phi_f i_q + (L_d - L_q) i_d i_q$', color='blue', linewidth=1, alpha=0.5)
-    axes[0].plot(time_history, Torque_histroy2, label='$\lambda_x x I_x$', color='green', linewidth=2,linestyle='--')
-    axes[0].plot(time_history, Torque_histroy3, label='$FEMM Torque$', color='red', linewidth=1)
-    #axes[0].plot(time_history, speed_history, label='RPM', color='red', linewidth=2)
-    axes[0].set_ylabel('Torque')
-    axes[0].legend(loc='best')
-    axes[0].grid(True, linestyle='--', alpha=0.6)
-    axes[0].set_title('IPMSM Back-EMF (BEMF) 3-Phase Voltages at 141 RPM (ABC LUT)')
+    #axes[0,0].plot(time_history, Torque_histroy, label=rf'$\phi_f i_q + (L_d - L_q) i_d i_q$', color='blue', linewidth=1, alpha=0.5)
+    #axes[0,0].plot(time_history, Torque_histroy2, label=rf'$\lambda_{{dq}} x I_{{dq}}$', color='green', linewidth=2,linestyle='--')
+    #axes[0,0].plot(time_history, Torque_histroy3, label='$FEMM Torque$', color='red', linewidth=1)
+    #axes[0,0].plot(time_history, speed_history, label='RPM', color='red', linewidth=2)
+    #axes[0,0].set_ylabel('Torque')
+    #axes[0,0].legend(loc='best')
+    #axes[0,0].grid(True, linestyle='--', alpha=0.6)
+    #axes[0,0].set_title(rf'IPMSM Back-EMF (BEMF) 3-Phase Voltages at {-current_speed_rpm:.1f} RPM (ABC LUT)')
+    # 1. 토크(좌축) 및 속도(우축, RPM)
+    ax = axes[0, 0]
+    ax_rpm = ax.twinx()
+
+    l1, = ax.plot(time_history, Torque_histroy, label=rf'$\phi_f i_q + (L_d - L_q) i_d i_q$', color='blue', linewidth=1, alpha=0.5)
+    l2, = ax.plot(time_history, Torque_histroy2, label=rf'$\lambda_{{dq}} x I_{{dq}}$', color='green', linewidth=2, linestyle='--')
+    l3, = ax.plot(time_history, Torque_histroy3, label='$FEMM Torque$', color='red', linewidth=1)
+    l4, = ax_rpm.plot(time_history, speed_history, label='RPM', color='purple', linewidth=2)
+
+    ax.set_ylabel('Torque [Nm]')
+    ax_rpm.set_ylabel('Speed [RPM]')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    ax.set_title(rf'IPMSM Back-EMF (BEMF) 3-Phase Voltages at {-current_speed_rpm:.1f} RPM (ABC LUT)')
+
+    # 좌축·우축 범례 통합
+    lines = [l1, l2, l3, l4]
+    labels = [line.get_label() for line in lines]
+    ax.legend(lines, labels, loc='best')
     
     # 2. 3상 BEMF 전압 파형
+    
     labels = ["$V_a$", "$V_b$", "$V_c$"]
     for  i in range(3):
-        axes[1].plot(time_history, np.array(v_a_history)[:,i], label=f'd$\lambda$/dt ({labels[i]})', color=colors_rgb[i], linewidth=1.2, alpha=0.5)
-        #axes[1].plot(time_history, np.array(v_a0_history)[:,i], label=f'$\gamma+J\lambda$ ({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
-        axes[1].plot(time_history, np.array(v_a0_history)[:,i], label=f'd$\lambda_x/dt+\omega X \lambda_x$ ({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
-    axes[1].set_ylabel('BEMF Voltage [V]')
-    axes[1].legend(loc='best')
-    axes[1].grid(True, linestyle='--', alpha=0.6)
+        axes[1,0].plot(time_history, np.array(v_a_history)[:,i], label=rf'd$\lambda_{{abc}}$/dt ({labels[i]})', color=colors_rgb[i], linewidth=1.2, alpha=0.5)
+        axes[1,0].plot(time_history, np.array(v_a0_history)[:,i], label=rf'$L_sI_{{dq}}+\omega\gamma_{{dq}}+\omega x \lambda_{{dq}}$ ({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
+        #axes[1,0].plot(time_history, np.array(v_a0_history)[:,i], label=f'd$\lambda_{{dq}}/dt+\omega x \lambda_{{dq}}$ ({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
+    axes[1,0].set_ylabel('BEMF Voltage [V]')
+    axes[1,0].legend(loc='best')
+    axes[1,0].grid(True, linestyle='--', alpha=0.6)
     
     # 3. 쇄교자속
     labels = ["$V_d$", "$V_q$", "$V_0$"]
     for  i in range(3):
-        axes[2].plot(time_history, np.array(v_d1_history)[:,i], label=f'V_dq0_from_abc({labels[i]})', color=colors_rgb[i], linewidth=1.2, alpha=0.5)
-        axes[2].plot(time_history, np.array(v_d_history)[:,i], label=f'$\gamma+J\lambda$ ({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
+        axes[0,1].plot(time_history, np.array(v_d_history)[:,i], label=rf'd$\lambda_{{abc}}$/dt({labels[i]})', color=colors_rgb[i], linewidth=1.2, alpha=0.5)
+        #axes[0,1].plot(time_history, np.array(v_d1_history)[:,i], label=f'd$\lambda_{{dq}}/dt+\omega x \lambda_{{dq}}$ ({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
+        axes[0,1].plot(time_history, np.array(v_d1_history)[:,i], label=rf'$L_sI_{{dq}}+\omega\gamma_{{dq}}+\omega x \lambda_{{dq}}$ ({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
         
-    axes[2].set_xlabel('Time [s]')
-    axes[2].set_ylabel('BEMF Voltage [V]')
-    axes[2].legend(loc='best')
-    axes[2].grid(True, linestyle='--', alpha=0.6)
+    axes[0,1].set_xlabel('Time [s]')
+    axes[0,1].set_ylabel('BEMF Voltage [V]')
+    axes[0,1].legend(loc='best')
+    axes[0,1].grid(True, linestyle='--', alpha=0.6)
     # 4. 전류
     labels = ["$d$", "$q$", "$0$"]
     for  i in range(3):
-        axes[3].plot(time_history, np.array(temp1_history)[:,i], label=f'temp1({labels[i]})', color=colors_rgb[i], linewidth=1.2, alpha=0.5)
-        axes[3].plot(time_history, np.array(temp2_history)[:,i], label=f'temp2({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
-        
-    axes[3].set_xlabel('Time [s]')
-    axes[3].set_ylabel('BEMF Voltage [V]')
-    axes[3].legend(loc='best')
-    axes[3].grid(True, linestyle='--', alpha=0.6)
+        #axes[1,1].plot(time_history, np.array(temp1_history)[:,i], label=f'temp1({labels[i]})', color=colors_rgb[i], linewidth=1.2, alpha=0.5)
+        #axes[1,1].plot(time_history, np.array(temp2_history)[:,i], label=f'temp2({labels[i]})', color=colors_rgb[i], linewidth=1.2,linestyle='--')
+        axes[1,1].plot(time_history, np.array(idq0_history)[:,i], label=rf'i_{{dq0}}({labels[i]})', color=colors_rgb[i], linewidth=1.2, alpha=0.5)
+    axes[1,1].set_xlabel('Time [s]')
+    #axes[1,1].set_ylabel('Voltage [V]')
+    axes[1,1].set_ylabel('Amphere [A]')
+    axes[1,1].legend(loc='best')
+    axes[1,1].grid(True, linestyle='--', alpha=0.6)
 
     plt.tight_layout()
     plt.savefig('ipmsm_bemf_141rpm_abc.png', dpi=300)

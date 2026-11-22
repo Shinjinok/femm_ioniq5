@@ -8,9 +8,9 @@ import socket
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import Pool
-from femm import FemmSession
+from ref_file3.femm import FemmSession
 
-poles = 8               # 극수
+poles = 8                # 극수
 pole_pairs = poles / 2   # 극쌍수 (4)
 CIRCUIT_NAMES = ["A", "B", "C"]
 HEADLESS_MODE = True     # True: GUI 없이 FEMM 고속 실행
@@ -98,6 +98,7 @@ def init_worker(base_fem_path):
     except:
         worker_id = abs(hash(name)) % 1000
         
+    # OS가 충돌 없는 빈 포트를 직접 찾아주므로 포트 겹침 현상 원천 차단
     port = find_free_port()
     _worker_fem_path = f"model_working_worker_{worker_id}_{port}.fem"
     
@@ -121,7 +122,6 @@ def worker_chunk_task(chunk_data):
     global _worker_session
     results_d = []
     results_q = []
-    results_0 = []
     
     try:
         for id_val, iq_val, theta_e_deg in chunk_data:
@@ -132,15 +132,16 @@ def worker_chunk_task(chunk_data):
             lamda_abc = run_femm_flux_only(_worker_session, Iabc, theta_mech_deg)
             
             lamda_dq0 = abc_to_dq(lamda_abc, theta_e_rad)
+            lamda_d = lamda_dq0[0]
+            lamda_q = lamda_dq0[1]
             
-            results_d.append((id_val, iq_val, theta_e_deg, lamda_dq0[0]))
-            results_q.append((id_val, iq_val, theta_e_deg, lamda_dq0[1]))
-            results_0.append((id_val, iq_val, theta_e_deg, lamda_dq0[2]))
+            results_d.append((id_val, iq_val, theta_e_deg, lamda_d))
+            results_q.append((id_val, iq_val, theta_e_deg, lamda_q))
                 
     except Exception as e:
-        return None, None, None, f"연산 중 오류 발생: {e}"
+        return None, None, f"연산 중 오류 발생: {e}"
         
-    return results_d, results_q, results_0, None
+    return results_d, results_q, None
 
 def generate_flux_lut_csv_multiprocessing():
     kill_lingering_femm()
@@ -149,9 +150,9 @@ def generate_flux_lut_csv_multiprocessing():
     if not os.path.exists(base_fem_path):
         raise FileNotFoundError(f"기준 모델 파일을 찾을 수 없습니다: {base_fem_path}")
 
-    id_grid = np.linspace(-2, 2, 10)        
-    iq_grid = np.linspace(-2, 2, 10)        
-    theta_e_grid = np.linspace(0, 360, 181)     
+    id_grid = np.linspace(-350, 350, 36)         # 69개
+    iq_grid = np.linspace(-350, 350, 36)         # 69개
+    theta_e_grid = np.linspace(0, 360, 181)    # 37개
 
     all_cases = []
     for theta_e_deg in theta_e_grid:
@@ -159,13 +160,14 @@ def generate_flux_lut_csv_multiprocessing():
             for iq_val in iq_grid:
                 all_cases.append((id_val, iq_val, theta_e_deg))
 
-    total_cases = len(all_cases)  
+    total_cases = len(all_cases)  # 총 176,157개
     
     chunk_size = 50
     chunks = []
     for i in range(0, total_cases, chunk_size):
         chunks.append(all_cases[i:i + chunk_size])
 
+    # 사용 가능한 모든 CPU 코어를 최대로 활용
     max_cores = mp.cpu_count()
     
     sys.stdout.write("==================================================\n")
@@ -177,25 +179,21 @@ def generate_flux_lut_csv_multiprocessing():
 
     file_ld = "LUT_lamda_d.csv"
     file_lq = "LUT_lamda_q.csv"
-    file_l0 = "LUT_lamda_0.csv"
+
     start_time = time.time()
     completed_cases = 0
 
     with open(file_ld, mode="w", newline="", encoding="utf-8") as f_d, \
-         open(file_lq, mode="w", newline="", encoding="utf-8") as f_q, \
-         open(file_l0, mode="w", newline="", encoding="utf-8") as f_0:
+         open(file_lq, mode="w", newline="", encoding="utf-8") as f_q:
         
         writer_d = csv.writer(f_d)
         writer_q = csv.writer(f_q)
-        writer_0 = csv.writer(f_0)
 
         writer_d.writerow(["Id_A", "Iq_A", "theta_e_deg", "lamda_d_Wb"])
         writer_q.writerow(["Id_A", "Iq_A", "theta_e_deg", "lamda_q_Wb"])
-        writer_0.writerow(["Id_A", "Iq_A", "theta_e_deg", "lamda_0_Wb"])
 
         with Pool(processes=max_cores, initializer=init_worker, initargs=(base_fem_path,)) as pool:
-            # 튜플 언패킹 개수 맞춤 (res_d, res_q, res_0, err)
-            for res_d, res_q, res_0, err in pool.imap_unordered(worker_chunk_task, chunks):
+            for res_d, res_q, err in pool.imap_unordered(worker_chunk_task, chunks):
                 if err is not None:
                     sys.stdout.write(f"[오류 발생]: {err}\n")
                     sys.stdout.flush()
@@ -205,12 +203,10 @@ def generate_flux_lut_csv_multiprocessing():
                     writer_d.writerow([row[0], row[1], row[2], f"{row[3]:.8f}"])
                 for row in res_q:
                     writer_q.writerow([row[0], row[1], row[2], f"{row[3]:.8f}"])
-                for row in res_0:  # 버그 수정: res_q 대신 올바르게 res_0 순회
-                    writer_0.writerow([row[0], row[1], row[2], f"{row[3]:.8f}"])
                 
                 f_d.flush()
                 f_q.flush()
-                f_0.flush()
+                
                 completed_cases += len(res_d)
                 elapsed = time.time() - start_time
                 progress = (completed_cases / total_cases) * 100
@@ -241,7 +237,6 @@ def generate_flux_lut_csv_multiprocessing():
     sys.stdout.write(f" - 총 소요 시간: {t_hour}시간 {t_min}분 {t_sec}초 ({total_elapsed:.1f}초)\n")
     sys.stdout.write(f" - λd 파일: {os.path.abspath(file_ld)}\n")
     sys.stdout.write(f" - λq 파일: {os.path.abspath(file_lq)}\n")
-    sys.stdout.write(f" - λ0 파일: {os.path.abspath(file_l0)}\n")
     sys.stdout.write("==================================================\n")
     sys.stdout.flush()
     
