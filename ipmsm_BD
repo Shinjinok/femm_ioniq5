@@ -41,7 +41,7 @@
   \draw[arrows=-Latex, black] (node15.west) -- (1,-1.83) -- (0.53,-0.23);
   \draw[arrows=-Latex, black] (node14.west) -- (node15);
   \node[draw=black] (node17) at (3,-2.74) {$-\omega_e$};
-  \node[text=black, align=center] (node16) at (4.5,-2.74) {$\lambda_{mf}$};
+  \node[text=black, align=center] (node16) at (4.5,-2.74) {$\phi_{mf}$};
   \draw[arrows=-Latex, black] (node16.west) -- (node17.east);
   \draw[arrows=-Latex, black] (node17.west) -- (0.5,-2.74) -- (0.5,-0.42);
   \node[draw=black, shape=circle, inner sep=0.5pt] (node18) at (4.49,1.16) {$\times$};
@@ -53,14 +53,13 @@
   \draw[arrows=-Latex, black] (node19.east) -- (6.73,-0.13) -- (7.26,1);
   \draw[arrows=-Latex, black] (node21.east) -- (7.36,2.45) -- (7.36,1.27);
   \draw[arrows=-Latex, black] (node20.east) -- (7.26,1.15);
-  \node[draw=black] (node22) at (8.5,1.16) {$\frac{P}{2}$};
+  \node[draw=black] (node22) at (8.35,1.16) {$\frac{p_{pair}}{2}$};
   \draw[arrows=-Latex, black] (7.46,1.17) -- (node22.west);
   \node[draw=black] (node23) at (11.7,1.15) {$\int$};
   \draw[arrows=-Latex, black] (node22.east) -- (9.44,1.15);
   \node[text=black, align=center] (node26) at (13.05,1.15) {$\omega_m$};
-  \node[text=black, align=center] at (9.2,1.5) {$T_m$};
-  \node[text=black, align=center] at (7.8,1.5) {$T_e$};
-  \node[draw=black] (node24) at (6,-1) {$\lambda_{mf}$};
+  \node[text=black, align=center] at (9.2,1.5) {$\tau_m$};
+  \node[draw=black] (node24) at (6,-1) {$\phi_{mf}$};
   \draw[arrows=-Latex, black] (4.49,-0.13) -- (4.5,-1) -- (5.57,-1);
   \draw[arrows=-Latex, black] (node24.east) -- (7.36,-1) -- (7.36,1);
   \draw[arrows=-Latex, black] (4.49,2.45) -- (node18.north);
@@ -69,7 +68,7 @@
   \draw[arrows=-Latex, black] (node23.east) -- (node26.west);
   \node[text=black, align=center] at (11.1,1.5) {$\dot\omega_m$};
 \draw[black] (9.6,1.15) circle (0.1cm);
-  \node[text=black, align=center] (node27) at (9.6,2.4) {$-T_L$};
+  \node[text=black, align=center] (node27) at (9.6,2.4) {$-\tau_L$};
   \draw[arrows=-Latex, black] (node27.south) -- (9.6,1.27);
   \draw[arrows=-Latex, black] (9.7,1.16) -- (node25.west);
   \node[text=black, align=center] at (4.18,2.69) {$i_d$};

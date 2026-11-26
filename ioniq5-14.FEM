@@ -1,6 +1,6 @@
 [Format]      =  4.0
 [Frequency]   =  0
-[Precision]   =  1e-008
+[Precision]   =  1e-08
 [MinAngle]    =  30
 [DoSmartMesh] =  1
 [Depth]       =  154
@@ -90,7 +90,7 @@
     <c1i> = 0
     <Mu_ssd> = 0
     <Sigma_ssd> = 0
-    <innerangle> = 15
+    <innerangle> = 0
     <outerangle> = 0
   <EndBdry>
   <BeginBdry>

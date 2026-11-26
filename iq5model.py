@@ -148,7 +148,7 @@ class iq5model:
         
         Lq = (lamda_dq0_iq2 - lamda_dq0_iq1)/(2*current_step)
         
-        Ldq = np.array([[Ld[0],Lq[0],0],[Ld[1],Lq[1],0],[Ld[2],Lq[2],1]])
+        Ldq = np.array([[Ld[0],Lq[0],0],[Ld[1],Lq[1],0],[Ld[2],Lq[2],0]])
         #각도 변위
         degree_step = 1.0
         #감마 계산
